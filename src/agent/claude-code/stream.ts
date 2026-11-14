@@ -26,6 +26,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
+import { REFUSAL_MESSAGE, refusalMessage } from "../refusal-details.ts";
 import { CliSessions, freshLaunch, type CliLaunch } from "./cli-sessions.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
@@ -68,7 +69,6 @@ const STOP_REASONS: Record<string, StopReason> = {
 	refusal: "error",
 };
 
-const REFUSAL_MESSAGE = "The model refused to complete the request";
 const ABORT_MESSAGE = "Request was aborted";
 const START_FAILED_MESSAGE = "claude CLI failed to start";
 const NO_STOP_REASON_MESSAGE = "claude CLI ended the message without a stop reason";
@@ -222,6 +222,7 @@ class ClaudeTurn {
 			case "messageDelta":
 				this.updateUsage(event.usage);
 				if (event.stopReason) this.setStopReason(event.stopReason);
+				if (event.stopReason === "refusal") this.output.errorMessage = refusalMessage(event.stopDetails);
 				return;
 
 			case "messageStop":

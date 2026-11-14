@@ -1,3 +1,4 @@
+import { withRefusalCategory } from "./refusal-details.ts";
 import {
 	clampThinkingLevel,
 	createModels,
@@ -180,7 +181,8 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 			}
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, requestOptions);
+			// Keep a policy refusal's category on the saved error (issue 474).
+			return withRefusalCategory(stream)(requestModel, context, requestOptions);
 		},
 	};
 }

@@ -1,4 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
+import { refusalDetailsOf, type RefusalDetails } from "../refusal-details.ts";
 
 export type CliUsage = Partial<Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite">>;
 
@@ -11,7 +12,7 @@ export type CliEvent =
 	| { type: "thinkingDelta"; index: number; thinking: string }
 	| { type: "toolInputDelta"; index: number; partialJson: string }
 	| { type: "blockStop"; index: number }
-	| { type: "messageDelta"; stopReason: string | null; usage: CliUsage }
+	| { type: "messageDelta"; stopReason: string | null; stopDetails: RefusalDetails | null; usage: CliUsage }
 	| { type: "messageStop" }
 	| { type: "assistantError"; error: string; text: string }
 	| { type: "resultError"; text: string }
@@ -32,6 +33,7 @@ type RawDelta = {
 	thinking?: string;
 	partial_json?: string;
 	stop_reason?: string | null;
+	stop_details?: unknown;
 };
 
 type RawStreamEvent = {
@@ -128,7 +130,8 @@ function parseStreamEvent(event: RawStreamEvent): CliEvent | null {
 
 		case "message_delta": {
 			const stopReason = event.delta?.stop_reason ?? null;
-			return { type: "messageDelta", stopReason, usage: toUsage(event.usage ?? {}) };
+			const stopDetails = stopReason === "refusal" ? refusalDetailsOf(event) ?? null : null;
+			return { type: "messageDelta", stopReason, stopDetails, usage: toUsage(event.usage ?? {}) };
 		}
 
 		case "message_stop":

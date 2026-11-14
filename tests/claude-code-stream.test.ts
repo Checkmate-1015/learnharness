@@ -688,6 +688,34 @@ test("refusal stop reason → error", async (t) => {
 	assert.equal(getErrorMessage(events), "The model refused to complete the request");
 });
 
+for (const { name, details, expected } of [
+	{
+		name: "category and explanation",
+		details: { type: "refusal", category: "reasoning_extraction", explanation: "Blocked." },
+		expected: "Blocked. (refusal category: reasoning_extraction)",
+	},
+	{
+		name: "category only",
+		details: { type: "refusal", category: "cyber", explanation: null },
+		expected: "The model refused to complete the request (refusal category: cyber)",
+	},
+	{
+		name: "explanation only",
+		details: { type: "refusal", category: null, explanation: "Blocked." },
+		expected: "Blocked.",
+	},
+	{ name: "null details", details: null, expected: "The model refused to complete the request" },
+]) {
+	test(`refusal keeps its stop details: ${name}`, async (t) => {
+		const { events } = await runScenario(t, [
+			streamEvent({ type: "message_start", message: { usage: {} } }),
+			streamEvent({ type: "message_delta", delta: { stop_reason: "refusal", stop_details: details }, usage: {} }),
+			streamEvent({ type: "message_stop" }),
+		]);
+		assert.equal(getErrorMessage(events), expected);
+	});
+}
+
 test("non-zero exit mid-stream → error naming the exit code, stderr logged not shown, process and temp dirs gone", async (t) => {
 	const consoleError = t.mock.method(console, "error", () => {});
 	const midStream = readFixtureLines("text.jsonl").slice(0, 5);
