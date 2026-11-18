@@ -474,6 +474,17 @@ describe("toLlmMessages carries the leading system message (request chrome)", ()
 	});
 });
 
+describe("serializeForSummary with block content", () => {
+	it("serializes a learner message made of blocks instead of throwing", () => {
+		const image = { id: "u1", role: "user", content: [{ type: "image", data: "AAAA", mimeType: "image/png" }], timestamp: 1 };
+		const mixed = { id: "u2", role: "user", content: [{ type: "text", text: "what is this?" }, { type: "image", data: "AAAA", mimeType: "image/png" }], timestamp: 2 };
+		const text = serializeForSummary([image, mixed] as never);
+		assert.match(text, /\[LEARNER\] \(image\)/);
+		assert.match(text, /\[LEARNER\] what is this\?\n\(image\)/);
+		assert.ok(!text.includes("AAAA"));
+	});
+});
+
 describe("tutor citations leaving the record", () => {
 	const link = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "x y", start: 0, end: 3, prefix: "", suffix: "" });
 
