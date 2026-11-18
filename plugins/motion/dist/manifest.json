@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "motion",
+  "name": "Motion",
+  "version": "0.1.0",
+  "minAppVersion": "0.6.1",
+  "description": "Short manim (3b1b/manim) animations that follow the lesson, in their own window. The configured model writes each scene; rendering runs locally and needs manimgl, ffmpeg and LaTeX.",
+  "main": "main.js",
+  "backend": "backend.cjs",
+  "styles": "styles.css"
+}
