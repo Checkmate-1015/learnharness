@@ -77,6 +77,8 @@ declare global {
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
 			expandWindow: () => void;
+			/** Open a plugin view in its own desktop window. */
+			openPluginWindow?: (pluginId: string, viewId: string) => void;
 			/** Native chrome follows the active theme (theme wave): main sets
 			 *  themeSource and repaints the window background / overlay. */
 			setAppearance?: (a: { mode: ThemeMode; background: string }) => void;
@@ -402,7 +404,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
-function SessionsSidebar() {
+function SessionsSidebarBody() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -950,6 +952,13 @@ function SessionsSidebar() {
 }
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
+/** The sidebar, except in a plugin view opened in its own window (?lhWindow=1), which shows only that view. */
+function SessionsSidebar() {
+	const [detached, setDetached] = useState(false);
+	useEffect(() => { setDetached(new URLSearchParams(window.location.search).has("lhWindow")); }, []);
+	return detached ? null : <SessionsSidebarBody />;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
 	const [contentRoot, setContentRoot] = useState<HTMLElement | null>(null);
 	const pathname = usePathname();

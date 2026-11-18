@@ -810,6 +810,21 @@ async function main() {
 		nativeTheme.themeSource = themeSourceFor(appearance.mode);
 		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
+	// A plugin view in its own window (fork: Motion visualizer). Same origin,
+	// same guards as the main window (createWindow); one window per view.
+	const pluginWindows = new Map();
+	ipcMain.on("lh:open-plugin-window", (event, target) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
+		const id = /^[a-z0-9][a-z0-9-]{0,63}$/;
+		if (!target || typeof target.pluginId !== "string" || typeof target.viewId !== "string" || !id.test(target.pluginId) || !id.test(target.viewId)) return;
+		const key = `${target.pluginId}/${target.viewId}`;
+		const existing = pluginWindows.get(key);
+		if (existing && !existing.isDestroyed()) { if (existing.isMinimized()) existing.restore(); existing.focus(); return; }
+		const win = createWindow(`${new URL(url).origin}/plugins/${target.pluginId}/${target.viewId}?lhWindow=1`);
+		win.setSize(960, 720);
+		pluginWindows.set(key, win);
+		win.once("closed", () => { if (pluginWindows.get(key) === win) pluginWindows.delete(key); });
+	});
 	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();

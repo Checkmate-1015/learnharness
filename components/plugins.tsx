@@ -82,6 +82,16 @@ export function PluginsProvider({ children }: { children: ReactNode }) {
 				reservedCodeBlockLanguages: [BUILTIN_MERMAID_LANGUAGE], reservedToolNames: reservedToolRendererNames(),
 				fetch: (...args) => fetch(...args), importModule: importPluginModule,
 				pathname: () => window.location.pathname, navigate: path => routerRef.current.push(path),
+				onlyPlugin: () => {
+					if (!new URLSearchParams(window.location.search).has("lhWindow")) return undefined;
+					return /^\/plugins\/([^/]+)\//.exec(window.location.pathname)?.[1];
+				},
+				openViewWindow: (pluginId, viewId) => {
+					// Already the detached window: stay here (navigate) instead of opening another.
+					if (!window.lh?.openPluginWindow || new URLSearchParams(window.location.search).has("lhWindow")) return false;
+					window.lh.openPluginWindow(pluginId, viewId);
+					return true;
+				},
 				openSettings: pluginId => window.dispatchEvent(new CustomEvent("lh:open-plugin-settings", { detail: pluginId })),
 				style: (url, onError) => {
 					const link = document.createElement("link");

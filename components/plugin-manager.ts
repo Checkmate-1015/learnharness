@@ -75,6 +75,12 @@ export interface PluginHost {
 	pathname(): string;
 	navigate(path: string): void;
 	openSettings?(pluginId: string): void;
+	/** Desktop only: open a plugin view in its own window; false when unavailable. */
+	openViewWindow?(pluginId: string, viewId: string): boolean;
+	/** A window that shows one plugin's view names that plugin here; only its frontend
+	 * is activated. A second window running every plugin's frontend would compete with
+	 * the main window for per-window state such as a plugin's active session. */
+	onlyPlugin?(): string | undefined;
 	createUi?(options: { signal: AbortSignal; pluginId?: string; onError: (error: unknown) => void }): import("@/src/core/plugin-ui").PluginUi;
 	style?(url: string, onError: () => void): PluginCleanup;
 }
@@ -247,8 +253,10 @@ export class PluginFrontendManager {
 			const info = infos.find(item => item.id === life.id);
 			if (!info?.enabled || info.status !== "active" || !info.manifest?.main || info.revision !== life.revision) this.stop(life);
 		}
+		const only = this.host.onlyPlugin?.();
 		for (const info of infos) {
 			if (!info.enabled || info.status !== "active" || !info.manifest?.main || this.lives.has(info.id)) continue;
+			if (only !== undefined && info.id !== only) continue;
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
@@ -467,6 +475,10 @@ export class PluginFrontendManager {
 				openHome: () => { if (this.current(life)) this.host.navigate("/"); },
 				openSession: id => { if (this.current(life)) this.host.navigate(`/chat/${encodeURIComponent(id)}`); },
 				openView: id => { if (this.current(life)) this.host.navigate(pluginViewPath(info.id, id)); },
+				openViewInWindow: id => {
+					if (!this.current(life)) return;
+					if (!this.host.openViewWindow?.(info.id, id)) this.host.navigate(pluginViewPath(info.id, id));
+				},
 				openSettings: () => { if (this.current(life)) this.host.openSettings?.(info.id); },
 			},
 		};

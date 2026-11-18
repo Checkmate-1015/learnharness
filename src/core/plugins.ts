@@ -361,6 +361,10 @@ export interface PluginFrontendContext {
 		openHome(): void;
 		/** Navigate to this plugin's registered view ID, not another plugin's view. */
 		openView(id: string): void;
+		/** Open this plugin's view in its own desktop window (focused if already
+		 * open). In a plain browser, where no desktop bridge exists, it navigates
+		 * this window like openView. */
+		openViewInWindow(id: string): void;
 		/** Open this plugin's dedicated Settings page, not package management. */
 		openSettings(): void;
 	};

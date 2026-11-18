@@ -696,6 +696,7 @@ export interface PluginFrontendContext {
         openSession(id: string): void;
         openHome(): void;
         openView(id: string): void;
+        openViewInWindow(id: string): void;
         openSettings(): void;
     };
 }
@@ -731,6 +732,7 @@ export interface PluginFrontendContext {
 - [app.openSession](#pluginfrontendcontext-appopensession)
 - [app.openHome](#pluginfrontendcontext-appopenhome)
 - [app.openView](#pluginfrontendcontext-appopenview)
+- [app.openViewInWindow](#pluginfrontendcontext-appopenviewinwindow)
 - [app.openSettings](#pluginfrontendcontext-appopensettings)
 
 ### PluginFrontendContext manifest
@@ -1074,6 +1076,7 @@ app: {
     openSession(id: string): void;
     openHome(): void;
     openView(id: string): void;
+    openViewInWindow(id: string): void;
     openSettings(): void;
 };
 ```
@@ -1118,6 +1121,22 @@ Navigate to this plugin's registered view ID, not another plugin's view.
 
 ```ts
 openView(id: string): void;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `id` | `string` |
+
+**Returns:** `void`.
+
+### PluginFrontendContext app.openViewInWindow
+
+Open this plugin's view in its own desktop window (focused if already
+open). In a plain browser, where no desktop bridge exists, it navigates
+this window like openView.
+
+```ts
+openViewInWindow(id: string): void;
 ```
 
 | Parameter | Type |

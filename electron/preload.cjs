@@ -82,6 +82,8 @@ contextBridge.exposeInMainWorld("lh", {
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
+	// Open one of a plugin's own views in a separate app window.
+	openPluginWindow: (pluginId, viewId) => ipcRenderer.send("lh:open-plugin-window", { pluginId, viewId }),
 	setAppearance: (a) => ipcRenderer.send("lh:appearance", a),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);
