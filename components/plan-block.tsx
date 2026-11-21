@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 // The placement engine — literally mermaid's: dagre-d3-es, the fork
@@ -484,6 +484,7 @@ export function PlanDiagram({
 	naturalSize,
 	monochrome,
 	fill,
+	onNodeClick,
 }: {
 	nodes: readonly LayoutNode[];
 	edges: ReadonlyArray<{ from: string; to: string }>;
@@ -510,6 +511,8 @@ export function PlanDiagram({
 	 *  dock band's marginalia mode, where the diagram must fit BOTH the
 	 *  flank's width and the band's height rather than run width-first. */
 	fill?: boolean;
+	/** Makes every node a button (the presented plan's comment affordance). */
+	onNodeClick?: (node: LayoutNode) => void;
 }) {
 	const layout = useMemo(() => blockLayout(nodes, edges), [nodes, edges]);
 	// Pad only the full-extent render — the plan window's override viewBox is
@@ -624,12 +627,26 @@ export function PlanDiagram({
 						transform={`translate(${layout.x.get(n.id) ?? 0}, ${layout.y.get(n.id) ?? 0})`}
 						data-testid={`plan-node-${n.id}`}
 						data-status={status}
+						{...(onNodeClick ? {
+							role: "button",
+							tabIndex: 0,
+							"aria-label": `Comment on plan node: ${n.title}`,
+							className: "group/node cursor-pointer outline-none",
+							// The node's click never reaches the block's "open the full plan".
+							onClick: (event: ReactMouseEvent) => { event.stopPropagation(); onNodeClick(n); },
+							onKeyDown: (event: ReactKeyboardEvent) => {
+								if (event.key !== "Enter" && event.key !== " ") return;
+								event.preventDefault();
+								event.stopPropagation();
+								onNodeClick(n);
+							},
+						} : {})}
 					>
 						{/* Rectangular — no corner rounding (owner). */}
 						<rect
 							width={w}
 							height={h}
-							className={monochrome ? MONO_BOX : BOX[status]}
+							className={`${monochrome ? MONO_BOX : BOX[status]}${onNodeClick ? " group-hover/node:fill-muted group-focus-visible/node:fill-muted" : ""}`}
 							strokeWidth={STROKE_W}
 						/>
 						{glow && (
@@ -674,10 +691,45 @@ export function PlanDiagram({
  * fragments are retired — position derives live in the popup and the
  * future DAG window).
  */
-export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () => void }) {
+export function PlanBlock({ data, onOpen, onNodeComment }: {
+	data: PlanBlockData;
+	onOpen: () => void;
+	/** Set only on the presented plan awaiting the learner's reply: a click
+	 *  on a node starts a comment on it; anywhere else still opens the plan. */
+	onNodeComment?: (node: { id: string; title: string }) => void;
+}) {
 	const markerId = useId().replace(/[^a-zA-Z0-9-]/g, "");
 	const statusMap = useMemo(() => new Map(data.nodes.map((n) => [n.id, n.status] as const)), [data]);
 	const statusOf = (id: string): PlanNodeStatus => statusMap.get(id) ?? "upcoming";
+	/* pad keeps centered strokes + the glow halo inside the frame; the
+	   cap keeps node text at or below chat prose size while still filling
+	   the column when it can (owner, plan-graph refinement round 1). */
+	const diagram = (
+		<PlanDiagram
+			nodes={data.nodes}
+			edges={data.edges}
+			statusOf={statusOf}
+			markerId={markerId}
+			pad={GRAPH_PAD}
+			textCapScale={TEXT_CAP_SCALE}
+			monochrome
+			onNodeClick={onNodeComment}
+		/>
+	);
+	if (onNodeComment) {
+		// Nodes are buttons here, so the block itself cannot be one: the
+		// surrounding area opens the plan by click, and by a button for keyboards.
+		return (
+			<div data-testid="plan-block-full" data-commentable="" className="block w-full text-left">
+				<Hint label="Click a node to comment on it, or anywhere else to open the full plan" side="bottom">
+					<div onClick={onOpen} className="cursor-pointer">{diagram}</div>
+				</Hint>
+				<button type="button" onClick={onOpen} className="sr-only focus:not-sr-only focus:mt-1 focus:text-xs focus:underline">
+					Open the full plan
+				</button>
+			</div>
+		);
+	}
 	return (
 		<Hint label="Open the full plan" side="bottom">
 <button
@@ -687,21 +739,29 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 			onClick={onOpen}
 			className="block w-full text-left"
 		>
-			{/* pad keeps centered strokes + the glow halo inside the frame; the
-		    cap keeps node text at or below chat prose size while still filling
-		    the column when it can (owner, plan-graph refinement round 1). */}
-		<PlanDiagram
-			nodes={data.nodes}
-			edges={data.edges}
-			statusOf={statusOf}
-			markerId={markerId}
-			pad={GRAPH_PAD}
-			textCapScale={TEXT_CAP_SCALE}
-			monochrome
-		/>
+			{diagram}
 		</button>
 </Hint>
 	);
+}
+
+/** Which plan block, if any, takes node comments: the newest one, while the
+ *  tutor's presented plan is still waiting for the learner's reply. Planning
+ *  ends at the first teaching question, so mid-lesson rewrites never qualify. */
+export function commentablePlanBlock(
+	messages: ReadonlyArray<{ role: string; parts: ReadonlyArray<{ type: string }> }>,
+	phase: "probe" | "plan" | "teach",
+	busy: boolean,
+): { messageIndex: number; partIndex: number } | null {
+	if (busy || phase === "teach") return null;
+	for (let mi = messages.length - 1; mi >= 0; mi--) {
+		const message = messages[mi]!;
+		if (message.role === "user") return null; // the learner already replied
+		for (let pi = message.parts.length - 1; pi >= 0; pi--) {
+			if (message.parts[pi]!.type === "data-plan-block") return { messageIndex: mi, partIndex: pi };
+		}
+	}
+	return null;
 }
 
 // ─── The live plan popup ──────────────────────────────────────────────────────

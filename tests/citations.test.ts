@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import {
 	CITATION_MAX_TEXT_LENGTH, citationLabel, citationsToReadableText, collectCitations, createTextSelector,
 	expandCitationsForModel, findCitationText, parseCitationHref, serializeCitation, withCitationComment,
-	type TutorCitation,
+	collectPlanNodeComments, parsePlanNodeHref, planNodeLabel, serializeComposerCitation, serializePlanNodeComment,
+	type PlanNodeComment, type TutorCitation,
 } from "../src/core/citations.ts";
+import { parseComposerTokens } from "../src/core/composer-tokens.ts";
 
 const base: TutorCitation = { version: 1, chatId: "chat_1", messageId: "msg_9", text: "the derivatives multiply", start: 4, end: 28, prefix: "and ", suffix: " here" };
 const hrefOf = (link: string) => link.slice(link.indexOf("(") + 1, -1);
@@ -124,4 +126,58 @@ describe("text selector", () => {
 		assert.equal(after.suffix.length, 31);
 		assert.doesNotMatch(after.suffix, /[\uD800-\uDBFF]$/);
 	});
+});
+
+// ─── plan-node comments ─────────────────────────────────────────────────────
+
+test("a plan-node comment round-trips through its link, awkward characters included", () => {
+	const planNode: PlanNodeComment = { version: 1, kind: "plan-node", chatId: "chat_1", messageId: "msg (1)", nodeId: "chain-rule", title: "Chain rule (why it's a product)", comment: "I know this one) already\nskip it" };
+	const link = serializePlanNodeComment(planNode);
+	assert.deepEqual(collectPlanNodeComments(`before ${link} after`).map((o) => o.planNode), [planNode]);
+	assert.equal(serializeComposerCitation(planNode), link);
+	const bare = withCitationComment(planNode, "  ");
+	assert.equal("comment" in bare, false);
+	assert.equal(planNodeLabel(bare), planNode.title);
+	assert.equal(planNodeLabel(planNode), "I know this one) already skip it");
+});
+
+test("a malformed plan-node link stays ordinary text", () => {
+	for (const href of [
+		"lh-plan-node://v1/chat/msg?node=a",
+		"lh-plan-node://v1/chat/msg?node=a&title=T&extra=1",
+		"lh-plan-node://v2/chat/msg?node=a&title=T",
+		"lh-plan-node://v1/chat?node=a&title=T",
+		"lh-plan-node://v1/chat/msg?node=a&node=b&title=T",
+		"lh-plan-node://v1/chat/msg?node=&title=T",
+		"lh-plan-node://v1/chat/msg?node=a&title=%20",
+	]) assert.equal(parsePlanNodeHref(href), null, href);
+});
+
+test("the composer tokenises quotes and plan-node comments in text order", () => {
+	const node = serializePlanNodeComment({ version: 1, kind: "plan-node", chatId: "c", messageId: "m", nodeId: "roots", title: "Roots", comment: "too basic" });
+	const quote = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "hello", start: 0, end: 5, prefix: "", suffix: "" });
+	const tokens = parseComposerTokens(`a ${node} b ${quote} c`);
+	assert.deepEqual(tokens.map((token) => token.kind), ["text", "planNode", "text", "citation", "text"]);
+	assert.equal(tokens.map((token) => token.text).join(""), `a ${node} b ${quote} c`);
+});
+
+test("the tutor receives plan-node comments as their own block with node ids", () => {
+	const roots = serializePlanNodeComment({ version: 1, kind: "plan-node", chatId: "c", messageId: "m", nodeId: "roots", title: "Roots <b>", comment: "too basic" });
+	const goal = serializePlanNodeComment({ version: 1, kind: "plan-node", chatId: "c", messageId: "m", nodeId: "goal", title: "Goal" });
+	const quote = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "hello", start: 0, end: 5, prefix: "", suffix: "" });
+	const wire = expandCitationsForModel(`Drop ${roots} and ${goal}; also ${quote} and again ${roots}`);
+	assert.ok(wire.startsWith("Drop [plan-node-1] and [plan-node-2]; also [tutor-quote-1] and again [plan-node-1]\n\n<tutor_citations>\n"));
+	const block = /<plan_node_comments>\n[^\n]+\n([\s\S]+)\n<\/plan_node_comments>$/.exec(wire);
+	assert.ok(block);
+	assert.equal(block[1]!.includes("<b>"), false);
+	assert.deepEqual(JSON.parse(block[1]!), [
+		{ id: "plan-node-1", nodeId: "roots", title: "Roots <b>", comment: "too basic" },
+		{ id: "plan-node-2", nodeId: "goal", title: "Goal" },
+	]);
+	assert.equal(expandCitationsForModel(`only ${goal}`).includes("<tutor_citations>"), false);
+});
+
+test("documents show a plan-node comment as readable text", () => {
+	const roots = serializePlanNodeComment({ version: 1, kind: "plan-node", chatId: "c", messageId: "m", nodeId: "roots", title: "Roots", comment: "too basic" });
+	assert.equal(citationsToReadableText(`Change ${roots}please`), "Change \n\n> Plan node: Roots (roots)\n\nComment: too basic\n\nplease");
 });

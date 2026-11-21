@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { serializeCitation, withCitationComment } from "@/src/core";
+import { isPlanNodeComment, serializeComposerCitation, withCitationComment } from "@/src/core";
 import { MenuShell } from "./menu-shell";
 import { useInteractionLayers, type CloseOutcome } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
@@ -28,7 +28,8 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 	const draftRef = useRef<string | null>(null);
 	const { citation } = target;
 
-	const sourceRange = () => (transcript ? resolveCitationRange(transcript, citation.messageId, citation) : null);
+	// A plan-node comment has no quoted words: its popover anchors to the chip.
+	const sourceRange = () => (transcript && !isPlanNodeComment(citation) ? resolveCitationRange(transcript, citation.messageId, citation) : null);
 	const chipHost = () => target.host?.isConnected ? target.host
 		: Array.from(composer()?.querySelectorAll<HTMLElement>(`[${PATH_SOURCE_ATTRIBUTE}]`) ?? []).find((host) => host.getAttribute(PATH_SOURCE_ATTRIBUTE) === target.link) ?? null;
 	anchorRef.current = chipHost() ?? composer();
@@ -47,7 +48,7 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 		root.dispatchEvent(new (View?.CustomEvent ?? CustomEvent)(UPDATE_CITATION_EVENT, { detail }));
 	};
 	const save = (comment: string, andSend: boolean) => {
-		const next = serializeCitation(withCitationComment(citation, comment));
+		const next = serializeComposerCitation(withCitationComment(citation, comment));
 		if (next !== target.link) update(next);
 		onClose();
 		if (andSend) onSend();

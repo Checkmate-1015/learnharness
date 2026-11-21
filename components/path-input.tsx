@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
-import { CitationChip } from "./citation-chip";
+import { CitationChip, PlanNodeChip } from "./citation-chip";
 import { cn } from "../lib/utils";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertCitation, insertFilePaths, locateToken,
@@ -347,6 +347,10 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		>{initial.current.value}</div>
 		{chips.map(({ host, token }) => createPortal(token.kind === "path"
 			? <FilePathChip path={token.path} contentEditable={false} />
-			: <CitationChip citation={token.citation} variant="composer" contentEditable={false} source={{ start: token.start, end: token.end, link: token.text, host }} />, host))}
+			: token.kind === "planNode"
+				? <PlanNodeChip planNode={token.planNode} variant="composer" contentEditable={false} source={{ start: token.start, end: token.end, link: token.text, host }} />
+			: token.kind === "citation"
+				? <CitationChip citation={token.citation} variant="composer" contentEditable={false} source={{ start: token.start, end: token.end, link: token.text, host }} />
+			: null, host))}
 	</>;
 });

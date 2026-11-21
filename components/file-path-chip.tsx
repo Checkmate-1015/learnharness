@@ -11,7 +11,7 @@ import {
 	Folder,
 } from "lucide-react";
 import { filePathLabel, isDirectoryReference, parseComposerTokens } from "@/src/core";
-import { CitationChip } from "./citation-chip";
+import { CitationChip, PlanNodeChip } from "./citation-chip";
 
 function fileIcon(label: string) {
 	const extension = label.split(".").at(-1)?.toLowerCase();
@@ -59,6 +59,7 @@ export function PathText({ text }: { text: string }) {
 				<Fragment key={part.start}>
 					{part.kind === "path" ? <FilePathChip path={part.path} />
 						: part.kind === "citation" ? <CitationChip citation={part.citation} variant="transcript" />
+						: part.kind === "planNode" ? <PlanNodeChip planNode={part.planNode} variant="transcript" />
 						: part.text}
 				</Fragment>
 			))}

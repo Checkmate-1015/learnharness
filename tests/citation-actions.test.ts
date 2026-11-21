@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseHTML } from "linkedom";
-import { createCiteAction } from "../components/citation-actions.ts";
+import { commentOnPlanNode, createCiteAction } from "../components/citation-actions.ts";
 import { INSERT_CITATION_EVENT } from "../components/path-input.tsx";
-import { parseCitationHref } from "../src/core/citations.ts";
+import { parseCitationHref, parsePlanNodeHref } from "../src/core/citations.ts";
 import type { CapturedSelection } from "../components/selection-text.ts";
 
 const capture = (text: string): CapturedSelection => ({ messageId: "m9", range: {} as Range, selector: { text, start: 0, end: text.length, prefix: "", suffix: "" } });
@@ -33,5 +33,29 @@ describe("createCiteAction", () => {
 		assert.equal(action.onSelect(capture("x")), false);
 		assert.equal(action.disabledLabel!(capture("x".repeat(8_001))), "Shorten selection");
 		assert.equal(action.disabledLabel!(capture("x")), null);
+	});
+});
+
+describe("commentOnPlanNode", () => {
+	it("inserts a plan-node link into the composer and opens the comment editor on it", () => {
+		const { document } = parseHTML("<html><body><div id='c'></div></body></html>");
+		const composer = document.getElementById("c")! as unknown as HTMLElement;
+		const seen: unknown[] = [];
+		composer.addEventListener(INSERT_CITATION_EVENT, (event) => {
+			const detail = (event as CustomEvent).detail;
+			seen.push(parsePlanNodeHref(detail.link.slice(detail.link.indexOf("(") + 1, -1)));
+			detail.onInserted({ start: 0, end: detail.link.length, spaceBefore: false, spaceAfter: true });
+		});
+		const opened: Array<{ citation: unknown; fresh?: unknown }> = [];
+		const done = commentOnPlanNode({ chatId: "c1", messageId: "m4", node: { id: "roots", title: "The roots" }, composer: () => composer, openEditor: (target) => opened.push(target) });
+		const expected = { version: 1, kind: "plan-node", chatId: "c1", messageId: "m4", nodeId: "roots", title: "The roots" };
+		assert.equal(done, true);
+		assert.deepEqual(seen, [expected]);
+		assert.deepEqual(opened[0]!.citation, expected);
+		assert.ok(opened[0]!.fresh);
+	});
+
+	it("does nothing without an input to put the chip in", () => {
+		assert.equal(commentOnPlanNode({ chatId: "c1", messageId: "m4", node: { id: "a", title: "A" }, composer: () => null, openEditor: () => assert.fail("no editor") }), false);
 	});
 });

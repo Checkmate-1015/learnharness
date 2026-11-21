@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
 	PlanBlock,
+	commentablePlanBlock,
 	PlanPopup,
 	blockLayout,
 	topoFor,
@@ -288,5 +289,45 @@ describe("plan popup (live derivation)", () => {
 	it("renders the empty state when the session has no plan", () => {
 		const html = renderToStaticMarkup(<PlanPopup messages={[{ parts: [] }]} onClose={() => {}} />);
 		assert.match(html, /No plan in this session yet\./);
+	});
+});
+describe("plan node comments", () => {
+	const data: PlanBlockData = {
+		kind: "full", at: "2026-11-21T00:00:00Z", current: null,
+		nodes: [{ id: "a", title: "Alpha node", status: "upcoming" }, { id: "b", title: "Beta node", status: "upcoming" }],
+		edges: [{ from: "a", to: "b" }],
+	};
+
+	it("the presented plan renders each node as a comment button, and is not itself a button", () => {
+		const html = renderToStaticMarkup(<PlanBlock data={data} onOpen={() => {}} onNodeComment={() => {}} />);
+		assert.match(html, /<div data-testid="plan-block-full" data-commentable=""/);
+		assert.equal((html.match(/role="button"/g) ?? []).length, 2);
+		assert.match(html, /aria-label="Comment on plan node: Alpha node"/);
+		assert.match(html, /<button[^>]*>Open the full plan<\/button>/);
+	});
+
+	it("a read-only plan block has no node buttons", () => {
+		const html = renderToStaticMarkup(<PlanBlock data={data} onOpen={() => {}} />);
+		assert.equal(/role="button"/.test(html), false);
+		assert.match(html, /<button[^>]*data-testid="plan-block-full"/);
+	});
+
+	const text = { type: "text" };
+	const plan = { type: "data-plan-block" };
+	const user = { role: "user", parts: [text] };
+
+	it("only the newest presented plan takes comments, until the learner replies", () => {
+		const presented = [user, { role: "assistant", parts: [text, plan, text] }];
+		assert.deepEqual(commentablePlanBlock(presented, "plan", false), { messageIndex: 1, partIndex: 1 });
+		assert.equal(commentablePlanBlock([...presented, user], "plan", false), null);
+		const again = [...presented, user, { role: "assistant", parts: [plan] }];
+		assert.deepEqual(commentablePlanBlock(again, "plan", false), { messageIndex: 3, partIndex: 0 });
+	});
+
+	it("nothing takes comments while the tutor is working or once teaching has begun", () => {
+		const presented = [user, { role: "assistant", parts: [plan] }];
+		assert.equal(commentablePlanBlock(presented, "plan", true), null);
+		assert.equal(commentablePlanBlock(presented, "teach", false), null);
+		assert.equal(commentablePlanBlock([user, { role: "assistant", parts: [text] }], "plan", false), null);
 	});
 });

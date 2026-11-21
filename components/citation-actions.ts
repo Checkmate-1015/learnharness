@@ -1,12 +1,12 @@
 import { Quote } from "lucide-react";
-import { CITATION_MAX_TEXT_LENGTH, serializeCitation, type TutorCitation } from "@/src/core";
+import { CITATION_MAX_TEXT_LENGTH, serializeCitation, serializePlanNodeComment, type ComposerCitation, type PlanNodeComment, type TutorCitation } from "@/src/core";
 import { INSERT_CITATION_EVENT, type CitationInsertedRange, type InsertCitationDetail } from "./path-input";
 import type { SelectionAction } from "./selection-toolbar";
 
 /** A citation chip in the composer whose comment is being edited. `fresh`
  *  marks one inserted just now: Cancel removes it with the spaces it added. */
 export interface CitationEditTarget {
-	citation: TutorCitation;
+	citation: ComposerCitation;
 	link: string;
 	start: number;
 	host?: HTMLElement;
@@ -44,4 +44,26 @@ export function createCiteAction({ chatId, composer, openEditor }: {
 			return true;
 		},
 	};
+}
+
+/** A click on a node of the presented plan map: put a plan-node chip in the
+ *  composer and open the comment editor on it. False when no input is there. */
+export function commentOnPlanNode({ chatId, messageId, node, composer, openEditor }: {
+	chatId: string;
+	messageId: string;
+	node: { id: string; title: string };
+	composer: () => HTMLElement | null;
+	openEditor: (target: CitationEditTarget) => void;
+}): boolean {
+	const root = composer();
+	if (!root) return false;
+	const citation: PlanNodeComment = { version: 1, kind: "plan-node", chatId, messageId, nodeId: node.id, title: node.title };
+	const link = serializePlanNodeComment(citation);
+	const detail: InsertCitationDetail = {
+		link,
+		onInserted: (fresh) => openEditor({ citation, link, start: fresh.start, fresh, input: root }),
+	};
+	const View = root.ownerDocument.defaultView;
+	root.dispatchEvent(new (View?.CustomEvent ?? CustomEvent)(INSERT_CITATION_EVENT, { detail }));
+	return true;
 }

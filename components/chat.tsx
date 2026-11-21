@@ -63,7 +63,7 @@ import {
 	type LhMessage,
 	type ModelSlotName,
 } from "@/src/core";
-import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
+import { PlanBlock, PlanPopup, commentablePlanBlock, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
@@ -80,7 +80,7 @@ import type { PluginQuestionDraft } from "./session-core";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { SelectionToolbar } from "@/components/selection-toolbar";
-import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
+import { commentOnPlanNode, createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
 import { CitationCommentPopover } from "@/components/citation-comment-popover";
 import { revealCitationSource } from "@/components/citation-source";
@@ -673,6 +673,8 @@ export function Chat({
 	// color-coded dotted divider at each boundary; the header chip reads the
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
+	// The presented plan takes node comments until the learner replies to it.
+	const commentablePlan = useMemo(() => commentablePlanBlock(messages, phases.at(-1) ?? "probe", busy), [messages, phases, busy]);
 
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
 	/* The composer draft ref is synchronous, so sends and dictation flushes
@@ -1935,6 +1937,9 @@ export function Chat({
 																key={pi}
 																data={part.data as PlanBlockData}
 																onOpen={() => setPlanOpen(true)}
+																onNodeComment={commentablePlan?.messageIndex === mi && commentablePlan.partIndex === pi
+																	? (node) => { commentOnPlanNode({ chatId, messageId: m.id, node, composer: citeInput, openEditor: setCitationEdit }); }
+																	: undefined}
 															/>
 														);
 													case "tool-quiz":
