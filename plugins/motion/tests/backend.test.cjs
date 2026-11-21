@@ -360,3 +360,75 @@ test("a run that failed for another reason, or has nothing left to make, is not 
 		assert.equal(blocked.started.length, 1);
 	} finally { delete process.env.MOTION_MANIMGL; }
 });
+
+// ─── checking a clip before the learner sees it ──────────────────────────────
+
+const { hooks } = backend._internal;
+const withRenders = async (frames, body) => {
+	const saved = { ...hooks };
+	hooks.render = async ({ folder }) => { fs.writeFileSync(path.join(folder, "clip.mp4"), "video"); return { ok: true, clip: path.join(folder, "clip.mp4") }; };
+	hooks.frames = async () => frames;
+	try { await body(); } finally { Object.assign(hooks, saved); }
+};
+const FRAMES = ["early", "middle", "last"].map(name => ({ name, data: "AAAA", mimeType: "image/jpeg" }));
+const quickRun = async (id, taskId = "task_1") => {
+	const run = host({ status: "running" });
+	const tools = toolsFor(run.worker, { sequenceId: id, concept: "x", origin: "learner" }, taskId);
+	await tools.say("set_outline", { mode: "quick", question: "What does it do?" });
+	await tools.say("set_storyboard", { beats: [{ title: "One", caption: "c1" }] });
+	return { ...run, ...tools };
+};
+
+test("a rendered clip is hidden until the model approves it from its frames", () => withRenders(FRAMES, async () => {
+	const { tools, say, handlers, worker, context } = await quickRun("seq_kkkkkkkk");
+	const result = await tools.render_beat.execute("call", { index: 1, code: GOOD });
+	assert.match(result.content[0].text, /hidden from the learner until you check it/);
+	assert.deepEqual(result.content.slice(1).map(item => item.type), ["image", "image", "image"]);
+	const hidden = await handlers.get("get")({ id: "seq_kkkkkkkk" });
+	assert.equal(hidden.beats[0].versions[0].status, "review");
+	await assert.rejects(async () => handlers.get("clip")({ id: "seq_kkkkkkkk", beat: 1, v: 1 }), /no video/);
+	await assert.rejects(async () => worker.validateResult({ summary: "s" }, context), /waiting for its check/);
+	assert.match(await say("approve_beat", { index: 1, checked: "Blue and orange arrows, nothing overlaps." }), /approved and shown/);
+	const shown = (await handlers.get("get")({ id: "seq_kkkkkkkk" })).beats[0].versions[0];
+	assert.equal(shown.status, "ok");
+	assert.equal(shown.unchecked, undefined);
+	assert.match(shown.checked, /Blue and orange/);
+	worker.validateResult({ summary: "s" }, context);
+	assert.match(await say("approve_beat", { index: 1, checked: "again" }), /no render waiting/);
+}));
+
+test("a fix replaces the render under check, and a clip never approved is shown as not checked", () => withRenders(FRAMES, async () => {
+	const { say, handlers } = await quickRun("seq_llllllll");
+	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) await say("render_beat", { index: 1, code: GOOD });
+	let versions = (await handlers.get("get")({ id: "seq_llllllll" })).beats[0].versions;
+	assert.deepEqual(versions.map(version => version.status), ["replaced", "replaced", "replaced", "review"]);
+	assert.match(await say("render_beat", { index: 1, code: GOOD }), /out of attempts\. Its last render is kept, marked as not checked/);
+	versions = (await handlers.get("get")({ id: "seq_llllllll" })).beats[0].versions;
+	assert.equal(versions.at(-1).status, "ok");
+	assert.equal(versions.at(-1).unchecked, true);
+}));
+
+test("a render left under check when its run ends is released as not checked", () => withRenders(FRAMES, async () => {
+	const { say, handlers, dataDirectory } = await quickRun("seq_mmmmmmmm");
+	await say("render_beat", { index: 1, code: GOOD });
+	const file = path.join(dataDirectory, "sequences", "seq_mmmmmmmm", "sequence.json");
+	assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).beats[0].versions[0].status, "review");
+	// The same data seen by a host whose run is no longer working.
+	const later = { handlers: new Map() };
+	backend.activate({ dataDirectory, signal: new AbortController().signal, events: { emit() {} },
+		workers: { register() {}, get: () => ({ status: "failed" }), start() {}, wait: async () => ({}), cancel() {} },
+		handle: (name, handler) => later.handlers.set(name, handler), registerInstructions() {}, registerTools() {}, createBackgroundTool: () => ({}),
+		inference: { catalog: async () => ({ models: [], slots: {} }) }, learning: { listSessions: () => [], getSession: () => null } });
+	const seen = (await later.handlers.get("get")({ id: "seq_mmmmmmmm" })).beats[0].versions[0];
+	assert.equal(seen.status, "ok");
+	assert.equal(seen.unchecked, true);
+	assert.ok(handlers);
+}));
+
+test("a clip with no frames to look at is shown without a check", () => withRenders([], async () => {
+	const { say, handlers } = await quickRun("seq_nnnnnnnn");
+	assert.match(await say("render_beat", { index: 1, code: GOOD }), /shown without a check/);
+	const version = (await handlers.get("get")({ id: "seq_nnnnnnnn" })).beats[0].versions[0];
+	assert.equal(version.status, "ok");
+	assert.equal(version.unchecked, true);
+}));

@@ -5,6 +5,7 @@ Short manim animations (3b1b/manim, the `manimgl` command) that follow the lesso
 - **Sidebar → Motion** opens the Motion window. Type a concept to get a sequence of short clips: a quick look (up to 4) or a step-by-step derivation (up to 16) with a worked example, the reason for each step and a recap.
 - The teacher has a `motion` tool and can send an animation to the window during a lesson.
 - Comment on a clip to re-render just that clip; earlier versions stay available.
+- Every clip is checked before you see it: the model looks at three still frames of the render (colours, overlaps, labels, the "why" line) and re-renders if something is off. A clip that is still unapproved after 4 renders is shown marked "not checked".
 - If a run is cut off (the Mac slept, it was cancelled, a clip failed), **Continue** picks it up from the saved outline and makes only the clips that are missing. A run blocked part-way by the model provider's content filter restarts itself this way, up to 5 times.
 
 ## Setup

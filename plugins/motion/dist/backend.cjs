@@ -14,7 +14,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 
 const MAX_BEATS = 16; // a full derivation
@@ -51,8 +51,14 @@ How to work:
    - recap: the last beat replays the whole chain in about 20 seconds, each step in order, ending on the result.
    Every outline step must be covered by a beat (set the beat's step number). Each beat has: title; caption (one sentence); why (one short line shown on screen, the reason for this beat's move); note (2 to 4 sentences read under the player: what just happened, why it is allowed, what it sets up next).
    If set_storyboard lists problems, fix them and call it again.
-3. For each beat you were asked to make, call render_beat with the complete Python source. If it returns an error, read it, fix the scene and call render_beat again. After the tool says a beat is out of attempts, move on.
-4. When every requested beat has been rendered or is out of attempts, call submit_result with a one- or two-sentence summary of what the clips show.
+3. For each beat you were asked to make, call render_beat with the complete Python source. If it returns an error, read it, fix the scene and call render_beat again.
+   A render that succeeds returns still frames from the clip. The learner does not see the clip until you have checked it, so look at the frames before anything else:
+   - every object has the colour the running picture gives it (a white arrow that should be blue is a failure);
+   - nothing overlaps, is cut off by the frame edge or sits on top of the "why" line;
+   - labels, numbers and formulas are the ones this beat should show, and are correct;
+   - the "why" line is on screen and readable.
+   If all of that holds, call approve_beat. If anything is wrong, call render_beat again with the fix; do not approve a clip you would not want the learner to see. After the tool says a beat is out of attempts, move on.
+4. When every requested beat has been approved or is out of attempts, call submit_result with a one- or two-sentence summary of what the clips show.
 
 Scene rules:
 - Start with exactly: from manimlib import *
@@ -241,6 +247,28 @@ function renderScene({ folder, signal, run = spawn, timeoutMs = RENDER_TIMEOUT_M
 		});
 	});
 }
+/** Still frames for the visual check: early, middle and last, as JPEG. Resolves [] when ffmpeg cannot produce them. */
+function extractFrames({ clip, folder, run = execFile }) {
+	const { searchPath } = toolPaths();
+	const options = { env: { ...process.env, PATH: searchPath }, timeout: 30_000 };
+	const call = (command, args) => new Promise(resolve => { try { run(command, args, options, (error, stdout) => resolve(error ? null : String(stdout))); } catch { resolve(null); } });
+	return (async () => {
+		const duration = Number.parseFloat(await call("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", clip]) ?? "");
+		if (!Number.isFinite(duration) || duration <= 0) return [];
+		const frames = [];
+		for (const [name, at] of [["early", duration * 0.3], ["middle", duration * 0.65], ["last", Math.max(0, duration - 0.2)]]) {
+			const file = path.join(folder, `check-${name}.jpg`);
+			const done = await call("ffmpeg", ["-v", "error", "-y", "-ss", at.toFixed(2), "-i", clip, "-frames:v", "1", "-vf", "scale=854:-2", "-q:v", "4", file]);
+			if (done === null || !fs.existsSync(file)) continue;
+			frames.push({ name, data: fs.readFileSync(file).toString("base64"), mimeType: "image/jpeg" });
+		}
+		return frames;
+	})();
+}
+/** Replaceable in tests. */
+const hooks = { render: renderScene, frames: extractFrames };
+/** A render nobody approved (the run ended, or the beat ran out of attempts) is still shown, marked as not checked. */
+function releaseUnchecked(version) { version.status = "ok"; version.unchecked = true; }
 function findClip(folder) {
 	const stack = [folder];
 	while (stack.length) {
@@ -344,6 +372,8 @@ exports.activate = ctx => {
 			const targets = context.input.targets ?? sequence.beats.map(beat => beat.index);
 			const missing = targets.filter(index => !sequence.beats.find(beat => beat.index === index)?.versions.some(version => version.taskId === context.taskId));
 			if (missing.length) throw new Error(`Render beat ${missing.join(", ")} with render_beat before submitting.`);
+			const pending = targets.filter(index => sequence.beats.find(beat => beat.index === index)?.versions.some(version => version.status === "review" && version.taskId === context.taskId));
+			if (pending.length) throw new Error(`Beat ${pending.join(", ")} is waiting for its check: call approve_beat, or render_beat with a fix, before submitting.`);
 		},
 		tools(context) {
 			const input = context.input;
@@ -437,7 +467,12 @@ exports.activate = ctx => {
 					if (!beat) return reply(`There is no beat ${args.index}. Call set_outline and set_storyboard first, or use an existing index.`);
 					if (input.targets && !input.targets.includes(args.index)) return reply(`Beat ${args.index} is not part of this revision.`);
 					const used = attempts.get(args.index) ?? 0;
-					if (used >= MAX_ATTEMPTS) return reply(`Beat ${args.index} is out of attempts. Move on.`);
+					const waiting = beat.versions.findLast(item => item.status === "review" && item.taskId === context.taskId);
+					if (used >= MAX_ATTEMPTS) {
+						if (waiting) { releaseUnchecked(waiting); store.write(sequence); changed(sequence.id); }
+						return reply(`Beat ${args.index} is out of attempts.${waiting ? " Its last render is kept, marked as not checked." : ""} Move on.`);
+					}
+					if (waiting) waiting.status = "replaced";
 					attempts.set(args.index, used + 1);
 					const reason = unsafeReason(args.code);
 					const version = { v: beat.versions.length + 1, at: now(), taskId: context.taskId, status: "rendering", ...(input.comment ? { comment: input.comment } : {}) };
@@ -445,15 +480,42 @@ exports.activate = ctx => {
 					fs.mkdirSync(folder, { recursive: true });
 					fs.writeFileSync(path.join(folder, "scene.py"), args.code);
 					beat.versions.push(version); store.write(sequence); changed(sequence.id);
-					const result = reason ? { ok: false, error: reason } : await renderScene({ folder, signal: AbortSignal.any([context.signal, ctx.signal, ...(signal ? [signal] : [])]) });
+					const result = reason ? { ok: false, error: reason } : await hooks.render({ folder, signal: AbortSignal.any([context.signal, ctx.signal, ...(signal ? [signal] : [])]) });
 					sequence = store.require(sequence.id);
 					const saved = sequence.beats.find(item => item.index === args.index).versions.find(item => item.v === version.v);
-					saved.status = result.ok ? "ok" : "failed";
-					if (result.ok) saved.clip = path.relative(folder, result.clip); else saved.error = result.error;
-					store.write(sequence); changed(sequence.id);
-					if (result.ok) return reply(`Beat ${args.index} rendered.`);
 					const left = MAX_ATTEMPTS - used - 1;
+					const frames = result.ok ? await hooks.frames({ clip: result.clip, folder }) : [];
+					saved.status = !result.ok ? "failed" : "review";
+					if (result.ok) saved.clip = path.relative(folder, result.clip); else saved.error = result.error;
+					// With no frames there is nothing to check against, so the clip is shown as it is.
+					if (result.ok && !frames.length) releaseUnchecked(saved);
+					store.write(sequence); changed(sequence.id);
+					if (result.ok && !frames.length) return reply(`Beat ${args.index} rendered. No still frames could be taken, so it is shown without a check. Move on.`);
+					if (result.ok) return {
+						content: [
+							{ type: "text", text: `Beat ${args.index} rendered, and is hidden from the learner until you check it. These are ${frames.map(frame => frame.name).join(", ")} frames of the clip. Check colours against the running picture, overlaps and cut-off text, the labels and numbers, and the "why" line. Then call approve_beat for beat ${args.index}, or call render_beat again with a fix (${left > 0 ? `${left} render(s) left` : "no renders left: approve it if it is right, otherwise leave it and move on"}).` },
+							...frames.map(frame => ({ type: "image", data: frame.data, mimeType: frame.mimeType })),
+						],
+						details: {},
+					};
 					return reply(`Beat ${args.index} failed to render:\n${result.error}\n\n${left > 0 ? `Fix the scene and call render_beat again (${left} attempt(s) left).` : "This beat is out of attempts. Move on."}`);
+				},
+			}, {
+				name: "approve_beat",
+				label: "Approve clip",
+				description: "Release a rendered beat to the learner after you have looked at its frames and found nothing wrong.",
+				parameters: {
+					type: "object", additionalProperties: false, required: ["index", "checked"],
+					properties: { index: { type: "integer", minimum: 1, maximum: MAX_BEATS }, checked: line(300, "What you verified in the frames, in one sentence.") },
+				},
+				execute: async (_id, args) => {
+					if (context.signal.aborted || ctx.signal.aborted) throw new Error("Cancelled");
+					const sequence = open();
+					const waiting = sequence.beats.find(item => item.index === args.index)?.versions.findLast(item => item.status === "review" && item.taskId === context.taskId);
+					if (!waiting) return reply(`Beat ${args.index} has no render waiting for a check.`);
+					waiting.status = "ok"; waiting.checked = filled(args.checked) ? args.checked.trim() : "Checked.";
+					store.write(sequence); changed(sequence.id);
+					return reply(`Beat ${args.index} approved and shown to the learner.`);
 				},
 			}];
 		},
@@ -471,7 +533,9 @@ exports.activate = ctx => {
 			beats: sequence.beats.map(beat => ({
 				...beat,
 				// A version left "rendering" by a run that is no longer working never finished.
-				versions: beat.versions.map(version => version.status === "rendering" && !(working && version.taskId === last) ? { ...version, status: "failed", error: "Rendering was interrupted." } : version),
+				versions: beat.versions.map(version => working && version.taskId === last ? version
+					: version.status === "rendering" ? { ...version, status: "failed", error: "Rendering was interrupted." }
+					: version.status === "review" ? { ...version, status: "ok", unchecked: true } : version),
 			})),
 		};
 	}
@@ -479,8 +543,17 @@ exports.activate = ctx => {
 	/** Turn and time budget: a run that may become a full derivation gets room for 16 beats. */
 	const budget = input => {
 		const beats = input.targets?.length ?? (input.depth === "quick" ? QUICK_BEATS : MAX_BEATS);
-		return { maxTurns: 10 + beats * (MAX_ATTEMPTS + 1), timeoutMs: (beats > QUICK_BEATS ? 60 : 30) * 60_000 };
+		return { maxTurns: 10 + beats * (MAX_ATTEMPTS + 2), timeoutMs: (beats > QUICK_BEATS ? 60 : 30) * 60_000 };
 	};
+	/** When a run ends, renders still waiting for a check are shown as not checked, so a later Continue does not redo them. */
+	function release(id) {
+		const sequence = store.read(id);
+		if (!sequence) return;
+		const waiting = sequence.beats.flatMap(beat => beat.versions).filter(version => version.status === "review");
+		if (!waiting.length) return;
+		waiting.forEach(releaseUnchecked);
+		store.write(sequence);
+	}
 	/** `chosen` is resolved by the caller before anything is written, so a missing model leaves no half-made animation. */
 	function start(sequence, input, prompt, purpose, chosen) {
 		const task = ctx.workers.start("motion-sequence", {
@@ -489,7 +562,7 @@ exports.activate = ctx => {
 		});
 		const fresh = store.require(sequence.id);
 		if (!fresh.taskIds.includes(task.id)) { fresh.taskIds.push(task.id); store.write(fresh); }
-		void ctx.workers.wait(task.id).then(outcome => { changed(sequence.id); return autoResume(sequence.id, outcome); }, () => changed(sequence.id)).catch(() => changed(sequence.id));
+		void ctx.workers.wait(task.id).then(outcome => { release(sequence.id); changed(sequence.id); return autoResume(sequence.id, outcome); }, () => changed(sequence.id)).catch(() => changed(sequence.id));
 		changed(sequence.id);
 		return view(store.require(sequence.id));
 	}
@@ -634,4 +707,4 @@ exports.activate = ctx => {
 	});
 };
 
-exports._internal = { unsafeReason, sequenceStore, commentTargets, renderScene, findClip, lessonBrief, createPrompt, revisePrompt, resumePrompt, resumeTargets, canResume, environment, outlineProblems, storyboardProblems, outlineText, MAX_ATTEMPTS, MAX_BEATS, QUICK_BEATS, KINDS, MAX_AUTO_RESUMES };
+exports._internal = { unsafeReason, sequenceStore, commentTargets, renderScene, findClip, lessonBrief, createPrompt, revisePrompt, resumePrompt, resumeTargets, canResume, environment, outlineProblems, storyboardProblems, outlineText, MAX_ATTEMPTS, MAX_BEATS, QUICK_BEATS, KINDS, MAX_AUTO_RESUMES, extractFrames, hooks };

@@ -164,7 +164,7 @@ function mountPlayer(ctx, container, signal) {
 
 		const strip = el(doc, "ol", { class: "motion-strip" }, sequence.beats.map(item => {
 			const last = item.versions.at(-1);
-			const mark = latestOk(item) ? "" : last?.status === "rendering" ? " is-rendering" : last ? " is-failed" : " is-pending";
+			const mark = latestOk(item) ? "" : last?.status === "rendering" || last?.status === "review" ? " is-rendering" : last ? " is-failed" : " is-pending";
 			return el(doc, "li", {}, el(doc, "button", {
 				class: `motion-beat${item.index === beat.index ? " is-current" : ""}${mark}${item.kind ? ` is-${item.kind}` : ""}`, type: "button", title: item.kind ? KIND[item.kind] : undefined,
 				onclick: () => { state.beat = item.index; state.version = null; state.showSource = false; render(); },
@@ -177,11 +177,13 @@ function mountPlayer(ctx, container, signal) {
 		let screen;
 		if (version?.status === "ok") { screen = video; void loadClip(sequence, beat, version, video); }
 		else if (version?.status === "rendering") screen = el(doc, "div", { class: "motion-placeholder", text: "Rendering this clip…" });
+		else if (version?.status === "review") screen = el(doc, "div", { class: "motion-placeholder", text: "Checking this clip before showing it…" });
+		else if (version?.status === "replaced") screen = el(doc, "div", { class: "motion-placeholder", text: "This render was replaced after the check found a problem." });
 		else if (version) screen = el(doc, "div", { class: "motion-placeholder is-error" }, [el(doc, "p", { text: "This clip failed to render." }), el(doc, "pre", { text: (version.error || "").slice(-1200) })]);
 		else screen = el(doc, "div", { class: "motion-placeholder", text: sequence.working ? "Waiting its turn…" : "Not rendered." });
 
 		const versions = el(doc, "select", { class: "motion-select", "aria-label": "Version", onchange: event => { state.version = Number(event.target.value); state.showSource = false; render(); } },
-			beat.versions.map(item => el(doc, "option", { value: item.v, selected: item.v === version?.v, text: `Version ${item.v}${item.status === "ok" ? "" : ` (${item.status})`}${item.comment ? `: ${item.comment.slice(0, 40)}` : ""}` })));
+			beat.versions.map(item => el(doc, "option", { value: item.v, selected: item.v === version?.v, text: `Version ${item.v}${item.status === "ok" ? (item.unchecked ? " (not checked)" : "") : item.status === "review" ? " (checking)" : ` (${item.status})`}${item.comment ? `: ${item.comment.slice(0, 40)}` : ""}` })));
 		const sourceToggle = el(doc, "button", { class: "motion-button", type: "button", text: state.showSource ? "Hide code" : "Show code", onclick: async () => {
 			state.showSource = !state.showSource;
 			if (state.showSource && version) { const source = await call("source", { id: sequence.id, beat: beat.index, v: version.v }); state.source = source?.code ?? ""; }
@@ -203,6 +205,7 @@ function mountPlayer(ctx, container, signal) {
 		const history = sequence.comments.filter(item => item.beat === null || item.beat === beat.index);
 
 		stage.replaceChildren(...[head, outlinePanel(sequence, beat), strip, screen,
+			version?.status === "ok" && version.unchecked ? el(doc, "p", { class: "motion-kind", text: "Not checked: this clip was shown without passing the frame check." }) : null,
 			beat.kind ? el(doc, "p", { class: "motion-kind", text: `${KIND[beat.kind]}${beat.step ? ` · outline step ${beat.step}` : ""}` }) : null,
 			el(doc, "p", { class: "motion-caption", text: beat.caption }),
 			beat.why ? el(doc, "p", { class: "motion-why", text: `Why: ${beat.why}` }) : null,
