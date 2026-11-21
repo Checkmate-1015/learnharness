@@ -1215,6 +1215,27 @@ test("a malformed JSON event shape fails the turn rather than escaping the readl
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
+test("an MCP call whose only difference is decoded \\uXXXX escapes is admitted with the streamed arguments", async (t) => {
+	// Claude CLI 2.1.326 decodes a literal \uXXXX written inside a string argument before the MCP request.
+	const streamed: ToolUse = { id: "toolu_escaped", name: "read", arguments: { path: "s.replace('-','\\u2212')", nested: { list: ["\\u00e9", 1] } } };
+	const decoded: ToolUse = { ...streamed, arguments: { path: "s.replace('-','−')", nested: { list: ["é", 1] } } };
+	const { runClaude } = createFakeRun(t, [...toToolUseMessage([streamed]), callTool(decoded), HOLD]);
+	const controller = new AbortController();
+	t.after(() => controller.abort());
+	const context = normalizeContext({ messages: [HI], tools: [{ name: "read", description: "Test harness tool", parameters: Type.Object({}) }] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), context, { sessionId: SESSION_ID, signal: controller.signal }));
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.deepEqual(done.message.content, [{ type: "toolCall", ...streamed }]);
+});
+
+test("decoded escapes do not excuse any other argument difference", async (t) => {
+	const streamed: ToolUse = { id: "toolu_escaped_other", name: "read", arguments: { path: "a\\u2212b" } };
+	const { runClaude } = createFakeRun(t, [...toToolUseMessage([streamed]), callTool({ ...streamed, arguments: { path: "a−c" } })]);
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] })));
+	assert.match(getErrorMessage(events) ?? "", /does not match its streamed tool intent/);
+});
+
 test("a mismatched MCP identity cannot admit a streamed call", async (t) => {
 	const read: ToolUse = { id: "toolu_intent", name: "read", arguments: { path: "a" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([read]), callTool({ ...read, id: "toolu_someone_else" })]);

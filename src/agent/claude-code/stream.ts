@@ -410,6 +410,22 @@ async function removeTurnResources(bridge: ToolBridge, files: TurnFiles): Promis
 	]);
 }
 
+/** Decode literal \uXXXX sequences in every string of a JSON value. */
+function decodeUnicodeEscapes(value: unknown): unknown {
+	if (typeof value === "string") return value.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+	if (Array.isArray(value)) return value.map(decodeUnicodeEscapes);
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decodeUnicodeEscapes(item)]));
+	return value;
+}
+
+/** The CLI decodes a literal \uXXXX the model wrote inside a string argument
+ *  (for example '\u2212' in a demo's JavaScript) before its MCP request. That
+ *  is the one difference from the streamed intent that is tolerated; the
+ *  streamed arguments stay the ones that run. */
+function sameArguments(streamed: unknown, requested: unknown): boolean {
+	return isDeepStrictEqual(streamed, requested) || isDeepStrictEqual(decodeUnicodeEscapes(streamed), decodeUnicodeEscapes(requested));
+}
+
 class ClaudeProcess implements LiveProcess {
 	toolCallIds: string[] = [];
 	private stderr = "";
@@ -534,7 +550,7 @@ class ClaudeProcess implements LiveProcess {
 		const calls: ToolCall[] = [];
 		for (const call of pending) {
 			const intent = this.sourceCalls.find((candidate) => candidate.id === call.id);
-			if (!intent || intent.name !== call.name || !isDeepStrictEqual(intent.arguments, call.arguments)) {
+			if (!intent || intent.name !== call.name || !sameArguments(intent.arguments, call.arguments)) {
 				this.fail("claude CLI compatibility error: MCP call does not match its streamed tool intent");
 				return;
 			}
