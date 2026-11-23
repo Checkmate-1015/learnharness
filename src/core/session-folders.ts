@@ -39,7 +39,7 @@ const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: tr
 export function buildSessionTree<T extends SidebarSession>(
 	sessions: readonly T[],
 	organization: SourceOrganization | undefined,
-	options: { query: string; include?: (session: T) => boolean },
+	options: { query: string; include?: (session: T) => boolean; pinned?: ReadonlySet<string> },
 ): SessionTreeNode<T>[] {
 	const query = options.query.trim();
 	const folders = organization?.folders ?? [];
@@ -72,6 +72,9 @@ export function buildSessionTree<T extends SidebarSession>(
 		const rank = query ? null : rankIn(parentId);
 		return (a: SessionTreeNode<T>, b: SessionTreeNode<T>): number => {
 			if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+			// LOCAL PATCH (folder-orchestrator): orchestrator chats lead their folder's sessions.
+			const pa = options.pinned?.has(idOf(a)) ?? false, pb = options.pinned?.has(idOf(b)) ?? false;
+			if (pa !== pb) return pa ? -1 : 1;
 			if (query) {
 				const aa = activityOf(a), ba = activityOf(b);
 				if (aa === null || ba === null) {

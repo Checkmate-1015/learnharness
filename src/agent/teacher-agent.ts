@@ -20,6 +20,8 @@ import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserApplies, sendToUserTool } from "./tools/send-to-user.ts";
 import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE } from "./narration-guard.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
+import { proposeThreadsTool, startThreadTool, updateFolderSettingsTool } from "./tools/propose-threads.ts";
+import { ORCHESTRATOR_PROMPT } from "../core/orchestration.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
@@ -155,6 +157,11 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** LOCAL PATCH (folder-orchestrator): the chat's folder layer: folder
+	 * instructions + thread brief (appended to the system prompt), and
+	 * whether this chat is a folder orchestrator (prober kind only: its own
+	 * base prompt, no probing/quiz tools, plus propose_threads). */
+	folderLayer?: { instructions: readonly string[]; orchestrator: boolean; saveFolderSettings?: Parameters<typeof updateFolderSettingsTool>[0]; startThread?: Parameters<typeof startThreadTool>[0] };
 }
 
 /**
@@ -211,9 +218,19 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
 	const narrationHooks = narrationGuard ? makeNarrationGuard() : undefined;
-	const composedPrompt = opts.promptSwitches
+	const orchestrator = kind === "prober" && opts.folderLayer?.orchestrator === true && opts.tools === undefined;
+	const composedPrompt = orchestrator
+		? [ORCHESTRATOR_PROMPT, ...effectivePromptSegments("prober", opts.promptSwitches ?? {}).filter((s) => s.shared && !s.path.endsWith("20-question-tools.md"))
+			.map((s) => (s.enabled ? s.overrideText! : s.sourceText).trim()).filter(Boolean)].join("\n\n---\n\n")
+		: opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	if (orchestrator) {
+		const probing = new Set(["probe_done", "quiz", "probe", "explain", "recall"]);
+		tools = [...tools.filter((tool) => !probing.has(tool.name)), proposeThreadsTool as AgentTool<any>,
+			...(opts.folderLayer?.saveFolderSettings ? [updateFolderSettingsTool(opts.folderLayer.saveFolderSettings) as AgentTool<any>] : []),
+			...(opts.folderLayer?.startThread ? [startThreadTool(opts.folderLayer.startThread) as AgentTool<any>] : [])];
+	}
 	const builtinPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Bind native read and preserve the kind/model-aware Claude output gate
 	// before resolving additive plugins. Explicit registries remain caller-owned.
@@ -233,8 +250,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const problemTools = kind === "practice" && practice && opts.chatId
 		? pluginProblemTools(contributions?.problemTypes ?? [], opts.chatId, practice.gate, practice.graphNodes) : [];
 	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
-	const systemPrompt = contributions?.instructions.length
-		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
+	const layered = [...(opts.folderLayer?.instructions ?? []), ...(contributions?.instructions ?? [])];
+	const systemPrompt = layered.length
+		? [builtinPrompt, ...layered].join("\n\n---\n\n")
 		: builtinPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is

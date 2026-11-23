@@ -22,6 +22,7 @@ import { useSourceDirectory } from "@/components/source-directory";
 import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, SidebarDropEdge, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { useAppearance } from "@/components/settings/appearance";
 import { SourceDragRow } from "@/components/source-folder-tree";
+import { changeOrchestration, FolderSettingsDialog, ORCHESTRATOR_ACCENT, OrchestratorIcon, ThreadBriefDialog, useOrchestration } from "@/components/folder-orchestration";
 import { OverlayScrollArea } from "@/components/overlay-scroll";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
@@ -315,6 +316,7 @@ export function SessionRow({
 	onContextMenu,
 	depth = 0,
 	compact = false,
+	orchestrator = false,
 }: {
 	chat: ChatListItem;
 	compact?: boolean;
@@ -327,6 +329,8 @@ export function SessionRow({
 	kbdSelected?: boolean;
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+	/** LOCAL PATCH (folder-orchestrator): this chat orchestrates a folder. */
+	orchestrator?: boolean;
 }) {
 	return (
 		<button
@@ -345,12 +349,13 @@ export function SessionRow({
 		>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
-				<span className={cn("block truncate", sidebarNameFont(compact))}>{chat.title}</span>
+				<span className={cn("block truncate", sidebarNameFont(compact), orchestrator && ORCHESTRATOR_ACCENT)}>{chat.title}</span>
 				{!compact && <span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
 			    the teaching rows and reads cleaner. */}
+			{orchestrator && <OrchestratorIcon className={cn("size-3.5 shrink-0", ORCHESTRATOR_ACCENT)} aria-label="Folder orchestrator" />}
 			{(chat.kind ?? "teach") === "practice" && (
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
 			)}
@@ -454,6 +459,10 @@ function SessionsSidebarBody() {
 	 * filter or search hides folders without matches. */
 	const { directory, failure: folderFailure, clearFailure: clearFolderFailure, reportFailure: reportFolderFailure, change: changeFolders } = useSourceDirectory(open);
 	const organization = directory?.organization;
+	const orchestration = useOrchestration();
+	const orchestratorChats = useMemo(() => new Set(Object.values(orchestration.folders).flatMap((f) => f.orchestratorChatId ? [f.orchestratorChatId] : [])), [orchestration]);
+	const [folderSettingsId, setFolderSettingsId] = useState<string | null>(null);
+	const [briefChat, setBriefChat] = useState<ChatListItem | null>(null);
 	const { openFolders, setOpen: setFolderOpen } = useOpenFolders();
 	const searching = query.trim() !== "";
 	// Search shows every folder open; collapsing one there affects only that
@@ -475,8 +484,8 @@ function SessionsSidebarBody() {
 	const tree = useMemo(() => {
 		if (!chats) return null;
 		const include = kindFilter === "all" ? undefined : (c: ChatListItem) => (c.kind ?? "teach") === kindFilter;
-		return buildSessionTree(chats, organization, { query, include });
-	}, [chats, kindFilter, organization, query]);
+		return buildSessionTree(chats, organization, { query, include, pinned: orchestratorChats });
+	}, [chats, kindFilter, organization, query, orchestratorChats]);
 	const rows = useMemo(() => tree && flattenSessionTree(tree, isFolderOpen), [tree, isFolderOpen]);
 	// The keyboard walk follows the visible session rows in tree order.
 	const shown = useMemo(() => rows?.flatMap((r) => r.type === "session" ? [r.session] : []) ?? null, [rows]);
@@ -786,6 +795,7 @@ function SessionsSidebarBody() {
 								router.push(`/chat/${c.id}`);
 							}}
 							onContextMenu={(e) => openContext(e, c)}
+							orchestrator={orchestratorChats.has(c.id)}
 						/>
 					)}
 				</SourceDragRow>
@@ -807,6 +817,7 @@ function SessionsSidebarBody() {
 				)}
 				{folderDrop.edge?.id === folder.id && <SidebarDropEdge pos={folderDrop.edge.pos} />}
 				<SidebarFolderRow
+					orchestrated={Boolean(orchestration.folders[folder.id]?.orchestratorChatId && chats?.some((x) => x.id === orchestration.folders[folder.id]!.orchestratorChatId))}
 					folder={folder}
 					depth={depth}
 					open={folderOpen}
@@ -1117,6 +1128,16 @@ function SessionsSidebarBody() {
 						>
 							Export as Markdown…
 						</button>
+						{ctxChatId && !orchestratorChats.has(ctxChatId) && (organization && placementOf(organization, ctxChatId)?.folderId || orchestration.threads[ctxChatId]?.brief) && (
+							<button
+								type="button"
+								data-testid="session-ctx-brief"
+								onClick={() => { setBriefChat(chats?.find((x) => x.id === ctxChatId) ?? null); setCtxChatId(null); }}
+								className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							>
+								Session brief…
+							</button>
+						)}
 						{(() => {
 							const level = organization && ctxChatId ? placementOf(organization, ctxChatId)?.folderId ?? null : null;
 							return organization?.order?.[level ?? ""] ? (
@@ -1157,6 +1178,37 @@ function SessionsSidebarBody() {
 						preferredSide="down"
 						menuClass="flex w-52 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
 					>
+						{(() => {
+							const orch = orchestration.folders[ctxFolderId]?.orchestratorChatId;
+							const live = orch && chats?.some((x) => x.id === orch) ? orch : null;
+							return (
+								<button
+									type="button"
+									data-testid="folder-ctx-orchestrator"
+									onClick={() => {
+										const id = ctxFolderId;
+										setCtxFolderId(null);
+										if (live) { router.push(`/chat/${live}`); return; }
+										void changeOrchestration({ action: "spawn-orchestrator", folderId: id })
+											.then((r) => { setFolderOpen(id, true); if (r.chatId) router.push(`/chat/${r.chatId}`); })
+											.catch((error: Error) => reportFolderFailure(error.message));
+									}}
+									className={cn("flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent", ORCHESTRATOR_ACCENT)}
+								>
+									<OrchestratorIcon aria-hidden="true" className="size-3.5" />
+									{live ? "Open orchestrator" : "Spawn orchestrator"}
+								</button>
+							);
+						})()}
+						<button
+							type="button"
+							data-testid="folder-ctx-settings"
+							onClick={() => { setFolderSettingsId(ctxFolderId); setCtxFolderId(null); }}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							Instructions &amp; permissions…
+						</button>
+						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<button
 							type="button"
 							data-testid="folder-ctx-rename"
@@ -1200,6 +1252,13 @@ function SessionsSidebarBody() {
 					</MenuShell>
 				)}
 
+				{folderSettingsId !== null && organization?.folders.some((f) => f.id === folderSettingsId) && (
+					<FolderSettingsDialog folder={organization.folders.find((f) => f.id === folderSettingsId)!}
+						config={orchestration.folders[folderSettingsId]} onClose={() => setFolderSettingsId(null)} />
+				)}
+				{briefChat && (
+					<ThreadBriefDialog chat={briefChat} brief={orchestration.threads[briefChat.id]?.brief ?? ""} onClose={() => setBriefChat(null)} />
+				)}
 				{/* The two-option delete dialog (wave 6) — portaled to body
 				    by the component itself, lives here for state locality. */}
 				<DeleteSessionDialog

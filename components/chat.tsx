@@ -1,5 +1,6 @@
 "use client";
 
+import { ThreadProposalCard } from "@/components/folder-orchestration";
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { flushSync } from "react-dom";
@@ -2003,6 +2004,9 @@ export function Chat({
 																	: undefined}
 															/>
 														);
+													case "tool-propose_threads":
+														// LOCAL PATCH (folder-orchestrator): the split's start buttons.
+														return <ThreadProposalCard key={pi} chatId={chatId} part={part} />;
 													case "tool-quiz":
 													case "tool-probe":
 													case "tool-ask_user_question":

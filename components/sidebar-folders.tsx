@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type DragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
-import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
+import { ChevronRightIcon, FolderIcon, FolderOpenIcon, WorkflowIcon } from "lucide-react";
 import { canMoveFolder, orderKey, type OrganizationAction, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { EditableSourceName, SOURCE_DRAG_TYPE, SourceDragRow } from "@/components/source-folder-tree";
 import { cn } from "@/lib/utils";
@@ -160,7 +160,9 @@ export function useSidebarDrop(organization: SourceOrganization | undefined, cha
 	return { dropTarget, dropProps, rowDropProps, edge, containerProps };
 }
 
-export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable, compact = false, dropProps }: {
+export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable, compact = false, dropProps, orchestrated = false }: {
+	/** LOCAL PATCH (folder-orchestrator): the folder has an orchestrator. */
+	orchestrated?: boolean;
 	folder: SourceFolder; depth: number; open: boolean; dropActive: boolean; renaming: boolean; draggable: boolean; compact?: boolean;
 	dropProps?: Partial<Pick<HTMLAttributes<HTMLDivElement>, "onDragOver" | "onDragLeave" | "onDrop">>;
 	onToggle: () => void;
@@ -168,7 +170,8 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 	onRename: (name: string) => Promise<unknown>;
 	onRenameDone: () => void;
 }) {
-	const Icon = open ? FolderOpenIcon : FolderIcon;
+	const Icon = orchestrated ? WorkflowIcon : open ? FolderOpenIcon : FolderIcon;
+	const iconTone = orchestrated ? "text-violet-400" : "text-muted-foreground";
 	return (
 		<SourceDragRow kind="folder" id={folder.id} name={folder.name} enabled={draggable && !renaming}
 			data-testid={`sidebar-folder-row-${folder.id}`} data-drop-active={dropActive} {...dropProps}
@@ -176,7 +179,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 			{renaming ? (
 				<div className={cn("flex w-full items-center gap-1 pr-3", compact ? SIDEBAR_COMPACT_ROW : "py-1.5")} style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
-					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+					<Icon aria-hidden="true" className={cn("size-3.5 shrink-0", iconTone)} />
 					<EditableSourceName name={folder.name} initiallyEditing inputClassName={sidebarNameFont(compact)} onCancel={onRenameDone}
 						onSave={async (name) => { if (name !== folder.name) await onRename(name); onRenameDone(); }} />
 				</div>
@@ -187,7 +190,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 					className={cn("flex w-full items-center gap-1 pr-3 text-left hover:bg-accent", compact ? SIDEBAR_COMPACT_ROW : "py-1.5")}
 					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
-					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+					<Icon aria-hidden="true" className={cn("size-3.5 shrink-0", iconTone)} />
 					<span className={cn("min-w-0 flex-1 truncate", sidebarNameFont(compact))}>{folder.name}</span>
 				</button>
 			)}
