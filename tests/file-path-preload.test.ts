@@ -7,6 +7,7 @@ interface PathBridge {
 	platform: string;
 	getPathForFile(file: unknown): string;
 	chooseAttachmentFolder(...args: unknown[]): Promise<string | null>;
+	wispr: Record<"available" | "start" | "stop" | "engines" | "use", (...args: unknown[]) => Promise<unknown>>;
 	[key: string]: unknown;
 }
 
@@ -76,8 +77,8 @@ describe("path-only preload bridge", () => {
 	it("adds just the narrow path resolver to the explicit surface, without exposing Electron or filesystem APIs", () => {
 		const f = fixture(() => "");
 		assert.deepEqual(Object.keys(f.bridge).sort(), [
-			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "expandWindow", "getPathForFile", "getUpdateState", "getZoom",
-			"installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "openPluginWindow", "platform", "setAppearance", "subscriptions",
+			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "dismissStartupMessage", "expandWindow", "getPathForFile", "getUpdateState", "getZoom",
+			"installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "openPluginWindow", "platform", "setAppearance", "subscriptions", "takeStartupMessage", "wispr",
 		]);
 		assert.equal(f.bridge.platform, "darwin");
 		for (const name of ["webUtils", "ipcRenderer", "electron", "fs", "require", "readFile", "writeFile", "uploadFile", "openPath"]) {
@@ -91,6 +92,17 @@ describe("path-only preload bridge", () => {
 		await f.bridge.chooseAttachmentFolder({ properties: ["openFile", "multiSelections"], defaultPath: "/private" });
 		assert.deepEqual(f.invoked, [["lh:attachment:pick", "folder"]]);
 		assert.deepEqual(f.supplied, []);
+	});
+
+	it("Wispr Flow bridge (local patch) invokes only its fixed operations, never a renderer URL", async () => {
+		const f = fixture(() => "");
+		await f.bridge.wispr.available();
+		await f.bridge.wispr.start("wispr-flow://anything");
+		await f.bridge.wispr.stop("https://example.com");
+		await f.bridge.wispr.engines("rm -rf /");
+		await f.bridge.wispr.use("Handy");
+		await f.bridge.wispr.use("/bin/sh");
+		assert.deepEqual(f.invoked, [["lh:wispr", "available"], ["lh:wispr", "start"], ["lh:wispr", "stop"], ["lh:wispr", "engines"], ["lh:wispr", "use-handy"], ["lh:wispr", "use-wispr"]]);
 	});
 
 	it("retains context isolation, sandbox and disabled Node integration in the production window", () => {

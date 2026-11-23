@@ -95,3 +95,19 @@ it("action validation rejects invalid shapes, but trims nonempty names like sess
 it("corrupt/newer organization refuses instead of silently resetting or allowing cycles", () => {
 	for (const raw of [{ version: 2, folders: [], placements: {} }, { version: 1, folders: [{ id: "a", name: "A", parentId: "a", createdAt: "x" }], placements: {} }, { version: 1, folders: [], placements: { s: { folderId: "gone" } } }]) assert.throws(() => parseSourceOrganization(raw), /invalid or newer/);
 });
+
+it("arrange moves an entry and saves its container's manual order; reset-order returns to A–Z (local sidebar-order patch)", () => {
+	let state = apply(emptySourceOrganization(), { action: "create-folder", name: "F", parentId: null });
+	const f = state.folders[0]!.id;
+	state = apply(state, { action: "arrange", kind: "source", id: "s2", parentId: null, order: ["s2", "s1", "ghost"] }, ["s1", "s2"]);
+	assert.deepEqual(state.order, { "": ["s2", "s1"] }, "unknown ids are pruned");
+	state = apply(state, { action: "arrange", kind: "source", id: "s1", parentId: f, order: ["s1"] });
+	assert.equal(state.placements.s1?.folderId, f);
+	assert.deepEqual(state.order, { "": ["s2"], [f]: ["s1"] }, "an entry leaves its old container's order");
+	assert.throws(() => apply(state, { action: "arrange", kind: "folder", id: f, parentId: f, order: [f] }), /descendants/);
+	assert.throws(() => parseOrganizationAction({ action: "arrange", kind: "source", id: "s1", parentId: null, order: ["s2"] }), /must include/);
+	assert.deepEqual(parseSourceOrganization(JSON.parse(JSON.stringify(state))), state, "order round-trips through the store's parser");
+	state = apply(state, { action: "reset-order", parentId: null });
+	assert.deepEqual(state.order, { [f]: ["s1"] });
+	assert.throws(() => parseSourceOrganization({ ...state, order: { "": [1] } }), /invalid or newer/);
+});

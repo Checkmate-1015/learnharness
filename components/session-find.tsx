@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { requestFullHistory } from "@/components/history-window";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 import { kbdEventForAction, stepSessionMatch } from "@/src/core";
 import {
@@ -82,6 +83,9 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		const onFind = () => {
 			if (!isInteractionScopeEligible(scopeRef.current, controller)) return;
 			if (!open) previousFocus.current = document.activeElement as HTMLElement | null;
+			// History window (local patch): Find searches the whole session;
+			// matches refresh as the older parts mount (MutationObserver below).
+			requestFullHistory();
 			setOpen(true);
 			// A second Mod+F focuses/selects the retained query, not a second bar.
 			if (open) { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); }

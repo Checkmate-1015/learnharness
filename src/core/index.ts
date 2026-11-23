@@ -21,6 +21,7 @@ export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
+export * from "./session-folders.ts";
 export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
@@ -109,3 +110,4 @@ export * from "./plugin-submissions.ts";
 export type * from "./plugin-ui.ts";
 export type * from "./plugin-tree.ts";
 export * from "./plugin-agents.ts";
+export * from "./orchestration.ts";

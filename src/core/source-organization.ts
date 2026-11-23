@@ -19,7 +19,13 @@ export interface SourceOrganization {
 	version: 1;
 	folders: SourceFolder[];
 	placements: Record<string, SourcePlacement>;
+	/** Manual sidebar order per container (folder id, or ROOT_ORDER_KEY for
+	 * the top level): sibling ids, folders and sources alike. Absent means
+	 * A–Z. Older builds keep this key through their structuredClone writes. */
+	order?: Record<string, string[]>;
 }
+export const ROOT_ORDER_KEY = "";
+export const orderKey = (parentId: string | null) => parentId ?? ROOT_ORDER_KEY;
 export interface SourceEntry {
 	id: string;
 	kind: "chat" | "notes" | "missing";
@@ -43,7 +49,12 @@ export type OrganizationAction =
 	| { action: "rename-folder"; id: string; name: string }
 	| { action: "rename-source"; id: string; name: string }
 	| { action: "move"; kind: "source" | "folder"; id: string; parentId: string | null }
-	| { action: "delete-folder"; id: string };
+	| { action: "delete-folder"; id: string }
+	/** Move (or keep) an entry in `parentId` and set that container's manual
+	 * order; `order` is the container's sibling ids with `id` in its new place. */
+	| { action: "arrange"; kind: "source" | "folder"; id: string; parentId: string | null; order: string[] }
+	/** Back to A–Z for one container. */
+	| { action: "reset-order"; parentId: string | null };
 
 export const emptySourceOrganization = (): SourceOrganization => ({ version: 1, folders: [], placements: {} });
 export const placementOf = (state: SourceOrganization, id: string): SourcePlacement | undefined =>
@@ -86,6 +97,12 @@ export function parseSourceOrganization(raw: unknown): SourceOrganization {
 		if (!p || typeof p !== "object" || (p.folderId !== null && !ids.has(p.folderId))
 			|| (p.name !== undefined && (typeof p.name !== "string" || !p.name.trim()))) return fail();
 	}
+	if (state.order !== undefined) {
+		if (!state.order || typeof state.order !== "object" || Array.isArray(state.order)) return fail();
+		for (const list of Object.values(state.order)) {
+			if (!Array.isArray(list) || list.some((x) => typeof x !== "string")) return fail();
+		}
+	}
 	return state;
 }
 
@@ -99,6 +116,15 @@ export function parseOrganizationAction(raw: unknown): OrganizationAction {
 		case "create-folder": return { action: r.action, name: name(), parentId: parent() };
 		case "rename-folder": case "rename-source": return { action: r.action, id: id(), name: name() };
 		case "delete-folder": return { action: r.action, id: id() };
+		case "arrange": {
+			if (r.kind !== "source" && r.kind !== "folder") throw new Error("Invalid move kind.");
+			if (!Array.isArray(r.order) || r.order.length > 5000 || r.order.some((x) => typeof x !== "string")) throw new Error("Invalid order.");
+			const itemId = id();
+			const order = [...new Set(r.order as string[])];
+			if (!order.includes(itemId)) throw new Error("The order must include the moved entry.");
+			return { action: r.action, kind: r.kind, id: itemId, parentId: parent(), order };
+		}
+		case "reset-order": return { action: r.action, parentId: parent() };
 		case "move":
 			if (r.kind !== "source" && r.kind !== "folder") throw new Error("Invalid move kind.");
 			return { action: r.action, id: id(), kind: r.kind, parentId: parent() };
@@ -115,6 +141,28 @@ export function applyOrganizationAction(state: SourceOrganization, action: Exclu
 		next.folders.push({ ...newFolder, name: action.name, parentId: action.parentId });
 		return next;
 	}
+	if (action.action === "reset-order") {
+		if (next.order) { delete next.order[orderKey(action.parentId)]; if (Object.keys(next.order).length === 0) delete next.order; }
+		return next;
+	}
+	if (action.action === "arrange") {
+		if (action.kind === "source") {
+			if (!sourceIds.has(action.id)) throw new Error("Source no longer exists.");
+			next.placements = { ...next.placements, [action.id]: { ...placementOf(next, action.id), folderId: action.parentId } };
+		} else {
+			const folder = next.folders.find((f) => f.id === action.id);
+			if (!folder) throw new Error("Folder no longer exists.");
+			if (!canMoveFolder(next, action.id, action.parentId)) throw new Error("A folder cannot be moved into itself or its descendants.");
+			folder.parentId = action.parentId;
+		}
+		const known = new Set([...sourceIds, ...next.folders.map((f) => f.id)]);
+		const order = { ...(next.order ?? {}) };
+		// An entry sits in one container: drop it from every other order.
+		for (const [key, list] of Object.entries(order)) order[key] = list.filter((x) => x !== action.id && known.has(x));
+		order[orderKey(action.parentId)] = action.order.filter((x) => known.has(x));
+		next.order = order;
+		return next;
+	}
 	if (action.action === "move" && action.kind === "source") {
 		if (!sourceIds.has(action.id)) throw new Error("Source no longer exists.");
 		next.placements = { ...next.placements, [action.id]: { ...placementOf(next, action.id), folderId: action.parentId } };
@@ -129,6 +177,7 @@ export function applyOrganizationAction(state: SourceOrganization, action: Exclu
 	} else {
 		if (!folderIsEmpty(next, action.id, sourceIds)) throw new Error("Only empty folders can be removed. Move their entries out first.");
 		next.folders = next.folders.filter((f) => f.id !== action.id);
+		if (next.order) delete next.order[action.id];
 		for (const [id, p] of Object.entries(next.placements)) if (p.folderId === action.id) next.placements[id] = { ...p, folderId: null };
 	}
 	return next;

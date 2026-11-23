@@ -1,3 +1,4 @@
+import { orchestrationContextFor, saveFolderSettingsFromChat, startThreadFromChat } from "./orchestration.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	createPracticeAgent,
@@ -641,6 +642,7 @@ export async function handleChatInput(
 	// Both share this whole composition (write-ahead persist, liveness,
 	// steers, usage, extraction) — only the agent differs.
 	const teaching = hasProbeDone(agentMessages);
+	const folderLayer = orchestrationContextFor(chatId);
 	// BYOK (owner, 2026-09-22): the conversation chain was resolved by the
 	// turn gate above (chat.model override → strong slot → refused) — the
 	// engine build is pure from here; thinking levels clamp natively.
@@ -717,7 +719,16 @@ export async function handleChatInput(
 			return asAgentMessages(updates);
 		},
 		onUsage: collectUsage,
-		toolToggles: effective.agent.tools,
+		// LOCAL PATCH (folder-orchestrator): folder permissions lay over the
+		// user's Settings toggles; folder instructions + the thread brief
+		// join the system prompt; an orchestrator chat gets its own mode.
+		toolToggles: { ...effective.agent.tools, ...folderLayer.tools },
+		folderLayer: {
+			instructions: folderLayer.instructions,
+			orchestrator: folderLayer.orchestrates !== null,
+			...(folderLayer.orchestrates !== null ? { saveFolderSettings: (input: { instructions?: string; paths?: string[]; tools?: Record<string, boolean | null> }) => saveFolderSettingsFromChat(folderLayer.orchestrates!, input),
+				startThread: (input: { chunk?: number; title?: string; brief?: string }) => startThreadFromChat(chatId, input) } : {}),
+		},
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,

@@ -1,8 +1,31 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
 import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
+	if (new URL(req.url).searchParams.get("view") === "stats") {
+		// Stats refreshes don't adopt history or need plugin availability.
+		const chat = getChat(id);
+		return chat ? Response.json({ turns: chat.turns, pricing: sessionCost(chat) })
+			: Response.json({ error: "Not found" }, { status: 404 });
+	}
+	// Local Intel-build patch: `?meta=1` is the record WITHOUT its transcript
+	// (and other history-sized fields) for readers that need one small field
+	// (settings, coverage, turns/pricing). Long sessions are megabytes; three
+	// such full reads on every session open cost seconds on an Intel Mac.
+	if (new URL(req.url).searchParams.get("meta") === "1") {
+		const chat = getChat(id);
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		const { imageSnapshots: _images, messages: _messages, tree: _tree, sideChats: _sideChats, extractions: _extractions, ...meta } = chat as typeof chat & Record<"tree" | "sideChats" | "extractions", unknown>;
+		return Response.json({
+			...meta,
+			pricing: sessionCost(chat),
+			turnInFlight: isTurnRunning(id),
+			turnError: turnFailure(id),
+			compacting: compactionInFlight(id),
+			coverage: sessionCoverage(id),
+		});
+	}
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });

@@ -6,6 +6,8 @@ import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
 import { isModelsRefusal, isProviderKeyRefusal, type JobKind, type JobRecord } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
+import { DemoOutputCard } from "@/components/artifacts/demo-card";
+import { VisualOutputCard } from "@/components/artifacts/visual-card";
 
 /**
  * The dispatch card (contracts.ts "THE ASYNC PROTOCOL" §4): the tool-call
@@ -29,6 +31,7 @@ const KIND_LABEL: Record<JobKind, string> = {
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
+	const questionPending = useContext(ChatActionsContext)?.questionPending ?? false;
 	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
 	const label = kind === "plugin" ? job?.plugin?.label || job?.plugin?.toolName || KIND_LABEL.plugin : KIND_LABEL[kind];
 
@@ -48,7 +51,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 		return <DispatchRefusedCard label={label} line="needs a provider key" button="Add a key" />;
 	}
 	const failed = job.status === "error";
-	return (
+	const settled = (
 		<div
 			className="flex items-center gap-2 text-xs text-muted-foreground"
 			data-testid="dispatch-settled"
@@ -58,6 +61,26 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			<span>{failed ? "failed" : "finished"}</span>
 		</div>
 	);
+	return earlyArtifact(job, questionPending) ? (
+		<div className="space-y-2" data-testid="dispatch-early-artifact">
+			{settled}
+			{job.kind === "demo" ? <DemoOutputCard output={job.result} /> : <VisualOutputCard output={job.result} />}
+		</div>
+	) : settled;
+}
+
+/** Local patch (show-demos-early): a finished demo/figure whose delivery is
+ *  held back by a pending question (the transcript can't take the steer
+ *  until the answer arrives) renders here, in the teaching block, right
+ *  away. Once delivered, the steer card below takes over as usual. */
+export function earlyArtifact(job: JobRecord, questionPending: boolean): boolean {
+	if (!questionPending) return false;
+	if (job.kind !== "demo" && job.kind !== "visual") return false;
+	if (job.status !== "done" || job.delivery?.status !== "pending") return false;
+	const r = job.result as { html?: unknown; svg?: unknown } | undefined;
+	return job.kind === "demo"
+		? typeof r?.html === "string" && r.html.length > 0
+		: typeof r?.svg === "string" && r.svg.length > 0;
 }
 
 /** The refused card: quiet info tone — nothing red, nothing "failed". */

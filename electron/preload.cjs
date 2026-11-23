@@ -44,6 +44,8 @@ ipcRenderer.on("lh:open-settings", (_event, section) => {
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	takeStartupMessage: () => ipcRenderer.invoke("lh:startup-message:take"),
+	dismissStartupMessage: (id) => ipcRenderer.invoke("lh:startup-message:dismiss", id),
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
 	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
 	getPathForFile: (file) => webUtils.getPathForFile(file),
@@ -80,6 +82,15 @@ contextBridge.exposeInMainWorld("lh", {
 			ipcRenderer.on("lh:subscriptions:changed", listener);
 			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
 		},
+	},
+	// Handy / Wispr Flow dictation hand-off (local Intel-build patch; see main.cjs).
+	wispr: {
+		available: () => ipcRenderer.invoke("lh:wispr", "available"),
+		start: () => ipcRenderer.invoke("lh:wispr", "start"),
+		stop: () => ipcRenderer.invoke("lh:wispr", "stop"),
+		// Handy / Wispr Flow switch: fixed ops only.
+		engines: () => ipcRenderer.invoke("lh:wispr", "engines"),
+		use: (name) => ipcRenderer.invoke("lh:wispr", name === "Handy" ? "use-handy" : "use-wispr"),
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
 	// Open one of a plugin's own views in a separate app window.

@@ -33,9 +33,20 @@ export function isNarrationBlock(block: { type: string; thinkingSignature?: stri
 	}
 }
 
+/** Local patch (cli-replay-guard): the Claude Code CLI path carries no
+ *  thinking signatures, so isNarrationBlock never fires there. Its thinking
+ *  can still hold learner-facing feedback ("Your σ₁ … is correct") that never
+ *  reached the learner. An UNSIGNED thinking block that addresses the learner
+ *  counts as narration too. */
+export function isLeakedProse(block: { type: string; thinking?: string; thinkingSignature?: string }): boolean {
+	if (block.type !== "thinking" || block.thinkingSignature) return false;
+	const text = block.thinking?.trim() ?? "";
+	return text.length >= 40 && /\b(you|your|you're)\b/i.test(text);
+}
+
 export function questionLacksDeliveredProse(message: AssistantMessage, toolName: string, delivered = false): boolean {
 	if (!(QUESTION_TOOLS as readonly string[]).includes(toolName)) return false;
-	if (!message.content.some(isNarrationBlock as (b: AssistantMessage["content"][number]) => boolean)) return false;
+	if (!message.content.some(isNarrationBlock as (b: AssistantMessage["content"][number]) => boolean) && !message.content.some(isLeakedProse as (b: AssistantMessage["content"][number]) => boolean)) return false;
 	return !delivered && !message.content.some((b) => b.type === "text" && b.text.trim().length > 0);
 }
 
