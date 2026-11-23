@@ -472,6 +472,9 @@ export interface QuestionAnswerData {
 	committed?: string; // explain only (rendering): the model's committed answer
 	explanation?: string; // quiz only (rendering)
 	dismissed?: boolean;
+	/** Local patch (ask-first): the learner set the question aside to ask
+	 *  something first; the teacher re-poses it afterwards. Implies dismissed. */
+	setAside?: boolean;
 	answeredAt: string;
 }
 
@@ -781,6 +784,11 @@ export function dismissedAnswer(kind: QuestionKind, questionText: string): Quest
 }
 
 export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, unknown> {
+	if (ad.dismissed && ad.setAside) return {
+		kind: ad.kind, dismissed: true, setAside: true,
+		note: "The learner set this question aside to ask or explore something first (their next message). Answer that fully — with pictures where it has geometry — then pose this same question again (call the tool again) once their exploration is done, unless it no longer fits.",
+		...(ad.readingThinking ? { thinkingWhileReading: expandCitationsForModel(ad.readingThinking) } : {}),
+	};
 	if (ad.dismissed) return { kind: ad.kind, dismissed: true };
 	const out: Record<string, unknown> = { kind: ad.kind };
 	if (ad.dontKnow) out.dontKnow = true;

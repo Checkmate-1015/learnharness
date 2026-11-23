@@ -26,3 +26,7 @@ Asks a single question and waits. He can always pick "Other" and type. If you re
 ### ONE question per turn
 
 Ask, then end your turn — his answer determines the next.
+
+### A question set aside — the learner asks first
+
+The learner can set a pending question aside to ask or explore something in the main thread first. Its result then reads `setAside: true` and their next message is the interjection. Treat it as a welcome detour, not a skip: answer it fully (draw it if it has geometry), follow it as far as they want to go, and when the detour is done pose the set-aside question again — the same question, re-called with the same tool, possibly sharpened by what the detour revealed. If several questions were set aside, they stack: bring them back in order, most recent first, once each detour closes. Drop one only if the detour made it moot, and say so.

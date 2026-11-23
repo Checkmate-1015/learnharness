@@ -689,6 +689,26 @@ export function Chat({
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v; composerEditRevision.current++;
 	}, []);
+	// Local patch (ask-first): set the pending question aside so the learner
+	// can ask or explore in the main thread first. The question resolves as a
+	// set-aside dismissal (silent route, no turn); the composer returns with
+	// anything typed in the reading field moved into it; the teacher answers
+	// the next message and then re-poses the question (prompt rule).
+	const setAsideQuestion = useCallback(() => {
+		const p = pendingRef.current;
+		if (!p || busyRef.current) return;
+		const question = (p.input as { question?: string } | null)?.question ?? "";
+		const reading = readingThinkingRef.current.trim();
+		clearReadingThinking();
+		void closeSideThreadRef.current();
+		void dismissQuestion(p.toolCallId, { ...dismissedAnswer(toolQuestionKind(p.tool), question), setAside: true }, p.key);
+		const current = textRef.current.trim();
+		if (reading) applyText(current ? `${current}\n\n${reading}` : reading);
+		requestAnimationFrame(() => requestAnimationFrame(() => {
+			const field = document.querySelector<HTMLElement>('[data-attachment-composer] textarea, [data-attachment-composer] [contenteditable="true"]');
+			field?.focus();
+		}));
+	}, [dismissQuestion, clearReadingThinking, applyText]);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
@@ -2040,6 +2060,7 @@ export function Chat({
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
+					onSetAside={!busy && !compacting && reconciliation === "ready" ? setAsideQuestion : undefined}
 					onPrepareBuiltin={prepareBuiltin}
 					onBuiltinPendingInput={question => { const target = builtinTarget(question); return !!target && !!pluginManager?.hasPendingSubmissionInput(target); }}
 					onPrepareThinking={prepareThinking}
@@ -2380,7 +2401,7 @@ function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLEle
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
 	viewReader, viewTargets, unavailableOccurrence,
-	pending,
+	pending, onSetAside,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
 	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
 	initialQuestionDraft,
@@ -2414,6 +2435,8 @@ export function DockOverlay({
 	viewTargets?: SessionViewTargets;
 	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
+	/** Local patch (ask-first): set the pending question aside to ask first. */
+	onSetAside?: () => void;
 	onPrepareBuiltin: PrepareBuiltinSubmission;
 	onBuiltinPendingInput: (question: QuestionData) => boolean;
 	onPrepareThinking: PrepareThinkingSubmission;
@@ -2857,6 +2880,18 @@ export function DockOverlay({
 					    rounding starts, truncated, no background, no container. A
 					    line dies when its card lands (visibleQueuedSteers). */}
 					<QueuedSteersBody steers={queuedSteers} />
+					{pending && !pluginQuestion && onSetAside && (
+						<div className="mb-1.5 flex justify-end px-2">
+							<button
+								type="button"
+								data-testid="ask-first"
+								onClick={onSetAside}
+								className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+							>
+								Ask or explore first. The tutor will ask this again afterwards
+							</button>
+						</div>
+					)}
 					{/* The reading-thinking field (owner 2026-10-03): mounted while a
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
