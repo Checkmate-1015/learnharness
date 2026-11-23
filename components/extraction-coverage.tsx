@@ -46,7 +46,8 @@ export interface SessionCoverage {
  *  nothing rather than a fake zero; the honest-render doctrine). */
 async function fetchCoverage(chatId: string): Promise<SessionCoverage | null> {
 	try {
-		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`);
+		// Local patch: ?meta=1 — the coverage block without the whole transcript.
+		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}?meta=1`);
 		if (!res.ok) return null;
 		const body = (await res.json()) as { coverage?: SessionCoverage | null };
 		return body.coverage ?? null;

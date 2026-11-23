@@ -2,6 +2,8 @@
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { flushSync } from "react-dom";
+import { HistoryAnchor, HistorySentinel, unitsOf, unitStarts, useHistoryWindow } from "@/components/history-window";
 import { useChatSession } from "@/components/session";
 import { usePlugins } from "./plugins";
 import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } from "./plugin-submission-runner";
@@ -683,6 +685,14 @@ export function Chat({
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 	// The presented plan takes node comments until the learner replies to it.
 	const commentablePlan = useMemo(() => commentablePlanBlock(messages, phases.at(-1) ?? "probe", busy), [messages, phases, busy]);
+	// HISTORY WINDOW (local Intel-build patch, history-window.tsx): render
+	// only the recent slice of a long transcript; older parts mount on
+	// scroll-up, everything mounts for Find / citation jumps / #links.
+	const historyWindow = useHistoryWindow(messages);
+	const historyStarts = useMemo(() => unitStarts(messages), [messages]);
+	const historyHidden = historyWindow.hidden;
+	const historyHiddenRef = useRef(historyHidden);
+	historyHiddenRef.current = historyHidden;
 
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
 	/* The composer draft ref is synchronous, so sends and dictation flushes
@@ -1091,6 +1101,8 @@ export function Chat({
 		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host, input: source.host.closest<HTMLElement>("[data-file-path-input]") ?? undefined }),
 		openSource: (citation) => {
 			const context = scrollContextRef.current;
+			// History window: the cited message may not be mounted yet.
+			if (citation.chatId === chatId && historyHiddenRef.current > 0) flushSync(() => historyWindow.setHidden(0));
 			revealCitationSource({
 				transcript: transcriptElementRef.current,
 				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
@@ -1793,7 +1805,11 @@ export function Chat({
 								/>
 							)}
 
+							<HistoryAnchor hidden={historyHidden} />
+							<HistorySentinel hidden={historyHidden} onReach={historyWindow.loadEarlier} />
 							{messages.map((m, mi) =>
+								// History window: rows wholly above the rendered slice.
+								historyStarts[mi]! + unitsOf(m) <= historyHidden ? null :
 								m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
@@ -1874,6 +1890,7 @@ export function Chat({
 									first lesson block (the Lacan session, 2026-09-27). */}
 									{m.role === "assistant" &&
 									mi > 0 &&
+									historyStarts[mi]! >= historyHidden &&
 									phases[mi] === "teach" &&
 									phases[mi - 1] !== "teach" &&
 									teachStepIndex(m.parts) === -1 ? (
@@ -1914,6 +1931,8 @@ export function Chat({
 									<Message from="assistant" className="max-w-full" data-older-transcript-row={mi < newestTurnFrom ? "" : undefined}>
 									<MessageContent className="w-full">
 											{m.parts.map((part, pi) => {
+												// History window: this group's parts above the slice.
+												if (historyStarts[mi]! + pi < historyHidden) return null;
 												if (part.pluginProblem) return <ProblemCard key={pi} part={{ ...part, state: part.state ?? "input-available", toolCallId: part.toolCallId ?? "" }} />;
 												if (part.pluginQuestion) return <PluginQuestionPart key={pi} part={part} chatId={chatId} />;
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
