@@ -83,6 +83,15 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
 		},
 	},
+	// Handy / Wispr Flow dictation hand-off (local Intel-build patch; see main.cjs).
+	wispr: {
+		available: () => ipcRenderer.invoke("lh:wispr", "available"),
+		start: () => ipcRenderer.invoke("lh:wispr", "start"),
+		stop: () => ipcRenderer.invoke("lh:wispr", "stop"),
+		// Handy / Wispr Flow switch: fixed ops only.
+		engines: () => ipcRenderer.invoke("lh:wispr", "engines"),
+		use: (name) => ipcRenderer.invoke("lh:wispr", name === "Handy" ? "use-handy" : "use-wispr"),
+	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
 	// Open one of a plugin's own views in a separate app window.
 	openPluginWindow: (pluginId, viewId) => ipcRenderer.send("lh:open-plugin-window", { pluginId, viewId }),

@@ -767,6 +767,63 @@ async function main() {
 		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
 	});
 
+	// Dictation hand-off (local Intel-build patch): the renderer may ask only
+	// for fixed ops, never an arbitrary URL or command. Two apps can take the
+	// run, switchable from the Dictate bar (choice saved in userData; Handy is
+	// the default when both are installed). Handy (free, local Whisper/
+	// Parakeet): its own binary with --toggle-transcription forwards a toggle
+	// to the running instance (or launches it); toggles are stateless, so we
+	// track recording here and only toggle on a real change. Wispr Flow: its
+	// two fixed deep links; activate:false keeps LearnHarness frontmost so the
+	// text lands in its focused field.
+	const WISPR_LINKS = { start: "wispr-flow://start-hands-free", stop: "wispr-flow://stop-hands-free" };
+	const HANDY_BINS = ["/Applications/Handy.app/Contents/MacOS/handy", path.join(app.getPath("home"), "Applications/Handy.app/Contents/MacOS/handy")];
+	const handyBin = () => HANDY_BINS.find((bin) => fs.existsSync(bin)) ?? null;
+	let handyRecording = false;
+	const toggleHandy = (bin) => new Promise((resolve, reject) => {
+		const child = spawn(bin, ["--toggle-transcription"], { stdio: "ignore", detached: true });
+		child.once("error", reject);
+		child.once("spawn", () => { child.unref(); resolve(); });
+	});
+	// Which app to use when both are installed: remembered in userData.
+	const enginePrefFile = path.join(app.getPath("userData"), "dictation-engine.json");
+	const readEnginePref = () => { try { return JSON.parse(fs.readFileSync(enginePrefFile, "utf8")).engine; } catch { return null; } };
+	const installedEngines = () => [
+		...(handyBin() ? ["Handy"] : []),
+		...(app.getApplicationNameForProtocol("wispr-flow://") !== "" ? ["Wispr Flow"] : []),
+	];
+	const currentEngine = () => {
+		const engines = installedEngines();
+		const pref = readEnginePref();
+		return engines.includes(pref) ? pref : engines[0] ?? false;
+	};
+	let runEngine = null; // the app a live run started with
+	ipcMain.handle("lh:wispr", async (event, op) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (process.platform !== "darwin") return false;
+		if (op === "available") return currentEngine();
+		if (op === "engines") return installedEngines();
+		if (op === "use-handy" || op === "use-wispr") {
+			if (runEngine) return currentEngine(); // never switch mid-run
+			const engine = op === "use-handy" ? "Handy" : "Wispr Flow";
+			if (installedEngines().includes(engine)) fs.writeFileSync(enginePrefFile, JSON.stringify({ engine }));
+			return currentEngine();
+		}
+		if (op !== "start" && op !== "stop") return false;
+		const engine = op === "start" ? currentEngine() : runEngine ?? currentEngine();
+		runEngine = null;
+		if (engine === "Handy") {
+			const bin = handyBin();
+			if (!bin) return false;
+			if ((op === "start") !== handyRecording) await toggleHandy(bin);
+			handyRecording = op === "start";
+		} else if (engine === "Wispr Flow") {
+			await shell.openExternal(WISPR_LINKS[op], { activate: false });
+		} else return false;
+		if (op === "start") runEngine = engine;
+		return true;
+	});
+
 	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
 		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
 	}));

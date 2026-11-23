@@ -82,6 +82,8 @@ declare global {
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
+			/** Handy / Wispr Flow dictation hand-off (local Intel-build patch). */
+			wispr?: { available: () => Promise<string | false>; start: () => Promise<boolean>; stop: () => Promise<boolean>; engines?: () => Promise<string[]>; use?: (name: string) => Promise<string | false> };
 			expandWindow: () => void;
 			/** Open a plugin view in its own desktop window. */
 			openPluginWindow?: (pluginId: string, viewId: string) => void;

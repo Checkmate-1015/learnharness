@@ -219,6 +219,7 @@ describe("desktop window chrome", () => {
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
 			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "dismissStartupMessage", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "openPluginWindow", "platform", "setAppearance", "subscriptions", "takeStartupMessage",
+			"wispr", // local Wispr Flow patch: fixed start/stop/available ops only
 		]);
 		const appearance = { mode: "light", background: "#eeeeee" };
 		(bridge.setAppearance as (a: unknown) => void)(appearance);

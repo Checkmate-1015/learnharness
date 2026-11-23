@@ -144,6 +144,88 @@ function registerController(id: symbol, controller: { primary: boolean; toggle: 
 	};
 }
 
+// ─── Wispr Flow engine (local Intel-build patch) ──────────────────────────
+// When the desktop shell reports Wispr Flow installed, a run toggles Wispr
+// Flow's hands-free mode (wispr-flow://start|stop-hands-free) instead of
+// streaming to Deepgram. Wispr Flow types into whatever field has keyboard
+// focus, so a run pins focus (caret at the end) on its destination field
+// and stays "stopping" until Wispr's insertion lands there (or times out).
+export type DictationEngine = "deepgram" | "wispr";
+// The same engine also drives Handy (free local Whisper/Parakeet): the shell's
+// available() names the app it will use ("Handy" or "Wispr Flow"), and Handy
+// pastes the whole transcript once it finishes transcribing on the CPU, which
+// on an Intel Mac takes seconds, hence the longer settle wait.
+const WISPR_SETTLE_MS = 6000; // longest wait for Wispr's transcript after stop
+const HANDY_SETTLE_MS = 20000; // Handy transcribes locally after stop
+const WISPR_QUIET_MS = 400; // after the first insertion, end once input goes quiet
+let wisprProbe: Promise<boolean> | null = null;
+let externalName = "Wispr Flow";
+type ExternalBridge = { engines?: () => Promise<string[]>; use?: (name: string) => Promise<string | false> };
+/** The installed apps the Dictate bar can switch between (local patch). */
+function useExternalEngines(enabled: boolean) {
+	const [name, setName] = useState(externalName);
+	const [engines, setEngines] = useState<string[]>([]);
+	useEffect(() => {
+		if (!enabled) return;
+		let live = true;
+		setName(externalName);
+		const bridge = window.lh?.wispr as ExternalBridge | undefined;
+		void bridge?.engines?.().then((list) => { if (live && Array.isArray(list)) setEngines(list); }, () => {});
+		return () => { live = false; };
+	}, [enabled]);
+	const switchTo = useCallback(async (next: string) => {
+		const bridge = window.lh?.wispr as ExternalBridge | undefined;
+		const now = await bridge?.use?.(next).catch(() => false);
+		if (typeof now === "string" && now) {
+			externalName = now;
+			wisprProbe = Promise.resolve(true);
+			setName(now);
+		}
+	}, []);
+	return { name, engines, switchTo };
+}
+function wisprAvailable(): Promise<boolean> {
+	const bridge = typeof window === "undefined" ? undefined : window.lh?.wispr;
+	if (!bridge) return Promise.resolve(false);
+	wisprProbe ??= bridge.available().then((name) => {
+		if (typeof name === "string" && name) externalName = name;
+		return Boolean(name);
+	}, () => false);
+	return wisprProbe;
+}
+function editableField(el: Element | null): HTMLElement | null {
+	if (!(el instanceof HTMLElement)) return null;
+	const marked = el.closest<HTMLElement>("[data-file-path-input]");
+	if (marked) return marked;
+	if (el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && (el.type === "text" || el.type === "search"))) return el;
+	return el.isContentEditable ? el : null;
+}
+/** The field Wispr Flow should type into: the focused one, else (core runs)
+ *  the pending question's field, else the page's default composer. */
+function wisprField(fallback: boolean): HTMLElement | null {
+	const focused = editableField(document.activeElement);
+	if (focused || !fallback) return focused;
+	const question = questionTarget
+		? document.querySelector<HTMLElement>('[data-testid="question-dock"] [data-file-path-input], [data-testid="practice-dock"] [data-file-path-input], [data-testid="plugin-question-dock"] [data-file-path-input]')
+		: null;
+	return question ?? document.querySelector<HTMLElement>("[data-file-path-default]") ?? document.querySelector<HTMLElement>("[data-file-path-input]");
+}
+function focusAtEnd(el: HTMLElement) {
+	if (!el.isConnected || document.activeElement === el) return; // keep a live caret
+	el.focus();
+	if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+		el.setSelectionRange(el.value.length, el.value.length);
+		return;
+	}
+	const selection = window.getSelection();
+	if (!selection) return;
+	const range = document.createRange();
+	range.selectNodeContents(el);
+	range.collapse(false);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
  *  reconnect path both bottom out here. The keyless 503 (no
@@ -295,6 +377,8 @@ export interface DictationDestination { id: string; append: (text: string) => vo
 
 export type Dictation = {
 	phase: DictationPhase;
+	/** Which engine a run uses: Deepgram streaming, or Wispr Flow hands-free. */
+	engine?: DictationEngine;
 	/** One shared recorder; an explicit side destination never claims the main input. */
 	destinationId: string;
 	blocked?: boolean;
@@ -394,6 +478,15 @@ export function useDictation({ append, destination = "primary", disabled = false
 	const waitersRef = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([]);
 	const appendFailureRef = useRef<{ error: unknown } | null>(null);
 	const appendPendingRef = useRef(false);
+	/** Wispr Flow engine (local patch): probed once per window; a live run
+	 *  remembers its field and how to detach its insertion listeners. */
+	const [engine, setEngine] = useState<DictationEngine>("deepgram");
+	useEffect(() => {
+		let live = true;
+		void wisprAvailable().then((ok) => { if (live && ok) setEngine("wispr"); });
+		return () => { live = false; };
+	}, []);
+	const wisprRunRef = useRef<{ field: HTMLElement | null; detach?: () => void } | null>(null);
 
 	/** Flush into this run's fixed destination. Called exactly once at cleanup; the
 	 *  buffer clears itself so double-cleanup is a no-op. */
@@ -407,6 +500,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
 	const cleanup = useCallback((warmNext = true) => {
 		const endGen = ++genRef.current;
+		wisprRunRef.current?.detach?.();
+		wisprRunRef.current = null;
 		let appended: unknown;
 		// A second cleanup (cancel/dispose) cannot turn an unfinished async
 		// append into a successful finish: that would send the old draft.
@@ -549,6 +644,27 @@ export function useDictation({ append, destination = "primary", disabled = false
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
 		const gen = ++genRef.current;
+		// Wispr Flow engine (local patch): resolve the field synchronously,
+		// before any await can let focus wander, then hand off to Wispr.
+		const wisprTarget = window.lh?.wispr ? wisprField(primary && !destination) : null;
+		if (await wisprAvailable()) {
+			if (gen !== genRef.current) return;
+			wisprRunRef.current = { field: wisprTarget };
+			if (wisprTarget) focusAtEnd(wisprTarget);
+			let started = false;
+			try {
+				started = await window.lh!.wispr!.start();
+			} catch {}
+			if (gen !== genRef.current) return;
+			if (!started) {
+				setError(`Couldn't start ${externalName}`);
+				cleanup();
+				return;
+			}
+			setPhase("recording");
+			return;
+		}
+		if (gen !== genRef.current) return;
 		let language: DictationLanguage;
 		try {
 			language = await getLanguage();
@@ -644,6 +760,35 @@ export function useDictation({ append, destination = "primary", disabled = false
 		if (phaseRef.current !== "recording" && phaseRef.current !== "connecting") return;
 		setPhase("stopping");
 
+		// Wispr Flow engine (local patch): refocus the run's field, ask Wispr
+		// to stop, then end the run once its insertion lands there and input
+		// goes quiet, or after WISPR_SETTLE_MS (nothing said / Wispr stopped
+		// elsewhere). cleanup() detaches the listeners on every terminal path.
+		const wispr = wisprRunRef.current;
+		if (wispr) {
+			const field = wispr.field?.isConnected ? wispr.field : null;
+			if (field) focusAtEnd(field);
+			let quiet: ReturnType<typeof setTimeout> | null = null;
+			const end = () => {
+				if (gen === genRef.current) cleanup();
+			};
+			const landed = (event: Event) => {
+				if (field && !(event.target instanceof Node && field.contains(event.target))) return;
+				if (quiet) clearTimeout(quiet);
+				quiet = setTimeout(end, WISPR_QUIET_MS);
+			};
+			document.addEventListener("input", landed, true);
+			document.addEventListener("paste", landed, true);
+			wispr.detach = () => {
+				document.removeEventListener("input", landed, true);
+				document.removeEventListener("paste", landed, true);
+				if (quiet) clearTimeout(quiet);
+			};
+			safetyRef.current = setTimeout(end, externalName === "Handy" ? HANDY_SETTLE_MS : WISPR_SETTLE_MS);
+			void window.lh?.wispr?.stop().catch(() => {});
+			return;
+		}
+
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
 		// per-run nodes die with it; the AudioContext stays (mitigation C).
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -730,6 +875,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 
 	return {
 		phase,
+		engine,
 		destinationId,
 		toggleFor,
 		finishFor,
@@ -757,8 +903,15 @@ export function useDictation({ append, destination = "primary", disabled = false
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation, disabled = false }: { dictation: Dictation; disabled?: boolean }) {
-	const { phase, error, levelRef, toggle, active, clearError, blocked } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, blocked, engine } = dictation;
 	const { open: openSettings } = useSettingsDialog();
+	/** Wispr Flow engine (local patch): clicks must not steal keyboard focus
+	 *  from the field Wispr Flow types into. */
+	const wispr = engine === "wispr";
+	const keepFocus = wispr ? (event: { preventDefault(): void }) => event.preventDefault() : undefined;
+	const external = useExternalEngines(wispr);
+	const idleLabel = wispr ? `Dictate (${external.name})` : "Dictate";
+	const otherEngine = wispr ? external.engines.find((e) => e !== external.name) : undefined;
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
@@ -806,15 +959,16 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 	}, [active]);
 
 	if (!active) {
-		return (
+		const idleButton = (
 			<Hint
 				// The error line truncates in the button; its tooltip reveals it.
-				label={error ?? "Dictate"}
+				label={error ?? idleLabel}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
 				<button
 					type="button"
+					onMouseDown={keepFocus}
 					onClick={() => {
 						if (keyless) {
 							clearError();
@@ -829,9 +983,27 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
 					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<span className="max-w-full truncate">{error ?? idleLabel}</span>
 				</button>
 			</Hint>
+		);
+		if (!otherEngine) return idleButton;
+		return (
+			<div className="flex w-full min-w-0 items-center gap-1" data-testid="dictation-engine-row">
+				<div className="min-w-0 flex-1">{idleButton}</div>
+				<Hint label={`Dictate with ${otherEngine} instead`} side="top">
+					<button
+						type="button"
+						onMouseDown={keepFocus}
+						onClick={() => void external.switchTo(otherEngine)}
+						aria-label={`Switch dictation to ${otherEngine}`}
+						data-testid="dictation-engine-switch"
+						className="flex h-7 shrink-0 items-center rounded-md border border-border/50 bg-card/50 px-2 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+					>
+						⇄ {otherEngine === "Wispr Flow" ? "Wispr" : otherEngine}
+					</button>
+				</Hint>
+			</div>
 		);
 	}
 
@@ -840,6 +1012,7 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 			<Hint label="Stop dictation (Esc)" side="top">
 				<button
 					type="button"
+					onMouseDown={keepFocus}
 					onClick={toggle}
 					disabled={phase === "stopping"}
 					aria-label="Stop dictation"
@@ -851,6 +1024,11 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 				</button>
 			</Hint>
 			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
+			{wispr ? (
+				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" data-testid="dictation-wispr-status">
+					{phase === "stopping" ? (externalName === "Handy" ? "Handy is transcribing…" : `Inserting ${externalName} text…`) : phase === "connecting" ? `Starting ${externalName}…` : `${externalName} is listening — ⌘D or Stop to insert`}
+				</span>
+			) : (
 			<div ref={meterRef} className="flex h-4 min-w-0 flex-1 items-center gap-[2px]" data-testid="dictation-meter">
 				{levels.slice(-cellCount).map((v, i) => (
 					<span
@@ -860,6 +1038,7 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					/>
 				))}
 			</div>
+			)}
 		</div>
 	);
 }
