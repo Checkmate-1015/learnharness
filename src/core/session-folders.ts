@@ -1,5 +1,5 @@
 import { fuzzyScore } from "./fuzzy.ts";
-import { placementOf, type SourceDirectory, type SourceFolder, type SourceOrganization } from "./source-organization.ts";
+import { orderKey, placementOf, type SourceDirectory, type SourceFolder, type SourceOrganization } from "./source-organization.ts";
 
 /**
  * Session-sidebar and graph views over the ONE shared source organization
@@ -60,16 +60,34 @@ export function buildSessionTree<T extends SidebarSession>(
 	const activityOf = (node: SessionTreeNode<T>) => node.type === "session" ? node.session.updatedAt : node.activity;
 	const nameOf = (node: SessionTreeNode<T>) => node.type === "session" ? node.session.title : node.folder.name;
 	const idOf = (node: SessionTreeNode<T>) => node.type === "session" ? node.session.id : node.folder.id;
-	const compare = (a: SessionTreeNode<T>, b: SessionTreeNode<T>): number => {
-		if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
-		const aa = activityOf(a), ba = activityOf(b);
-		// Folders without visible sessions follow the other folders, A–Z.
-		if (aa === null || ba === null) {
-			if (aa !== ba) return aa === null ? 1 : -1;
+	// LOCAL PATCH (sidebar-order): outside search every level is A–Z, or the
+	// container's manual drag order when it has one (unlisted entries follow
+	// A–Z). Folders still lead sessions. Search keeps ranking by match.
+	const manual = organization?.order ?? {};
+	const rankIn = (parentId: string | null) => {
+		const list = manual[orderKey(parentId)];
+		return list ? new Map(list.map((id, i) => [id, i])) : null;
+	};
+	const compareIn = (parentId: string | null) => {
+		const rank = query ? null : rankIn(parentId);
+		return (a: SessionTreeNode<T>, b: SessionTreeNode<T>): number => {
+			if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+			if (query) {
+				const aa = activityOf(a), ba = activityOf(b);
+				if (aa === null || ba === null) {
+					if (aa !== ba) return aa === null ? 1 : -1;
+				} else if (a.score !== b.score) return b.score - a.score;
+			}
+			if (rank) {
+				const ra = rank.get(idOf(a)), rb = rank.get(idOf(b));
+				if (ra !== undefined || rb !== undefined) {
+					if (ra === undefined) return 1;
+					if (rb === undefined) return -1;
+					if (ra !== rb) return ra - rb;
+				}
+			}
 			return collator.compare(nameOf(a), nameOf(b)) || idOf(a).localeCompare(idOf(b));
-		}
-		if (query && a.score !== b.score) return b.score - a.score;
-		return ba.localeCompare(aa) || idOf(a).localeCompare(idOf(b));
+		};
 	};
 	const holdsSessions = (id: string, seen: Set<string>): boolean => occupied.has(id)
 		|| folders.some((f) => f.parentId === id && !seen.has(f.id) && holdsSessions(f.id, new Set([...seen, f.id])));
@@ -90,7 +108,7 @@ export function buildSessionTree<T extends SidebarSession>(
 				|| (holdsSessions(folder.id, within) && !inner.some((child) => child.type === "folder")))) continue;
 			children.push({ type: "folder", folder, children: inner, activity, score });
 		}
-		return children.sort(compare);
+		return children.sort(compareIn(parentId));
 	};
 	return build(null, new Set());
 }

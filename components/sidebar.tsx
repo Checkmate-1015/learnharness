@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { buildSessionTree, flattenSessionTree, folderDeletionScope, placementOf, type FolderDeletionScope, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
-import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, SidebarDropEdge, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { useAppearance } from "@/components/settings/appearance";
 import { SourceDragRow } from "@/components/source-folder-tree";
 import { OverlayScrollArea } from "@/components/overlay-scroll";
@@ -754,13 +754,18 @@ function SessionsSidebarBody() {
 		setDeletingFolder({ id, name: folder.name, copy, scope });
 	};
 
-	const renderTree = (nodes: SessionTreeNode<ChatListItem>[], depth: number): React.ReactNode => nodes.map((node, index) => {
+	const renderTree = (nodes: SessionTreeNode<ChatListItem>[], depth: number, parentId: string | null = null): React.ReactNode => {
+		const siblings = nodes.map((n) => n.type === "session" ? n.session.id : n.folder.id);
+		return nodes.map((node, index) => {
 		if (node.type === "session") {
 			const c = node.session;
 			const placedIn = organization ? placementOf(organization, c.id)?.folderId ?? null : null;
+			const edge = folderDrop.edge?.id === c.id ? folderDrop.edge.pos : null;
 			return (
 				<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled={Boolean(organization) && renamingId !== c.id}
-					className="relative" style={{ marginLeft: sidebarRowBox(depth).marginLeft }} {...folderDrop.dropProps(placedIn)}>
+					className="relative" style={{ marginLeft: sidebarRowBox(depth).marginLeft }}
+					{...folderDrop.rowDropProps({ kind: "source", id: c.id, parentId: placedIn, siblings, reorder: !searching })}>
+					{edge && <SidebarDropEdge pos={edge} />}
 					{renamingId === c.id ? (
 						<RenameRow
 							chat={c}
@@ -800,10 +805,12 @@ function SessionsSidebarBody() {
 					<div aria-hidden="true" data-testid={`sidebar-folder-thread-${folder.id}`} className="pointer-events-none absolute top-[23px] bottom-0 w-px bg-border/50"
 						style={{ left: sidebarRail(depth) }} />
 				)}
+				{folderDrop.edge?.id === folder.id && <SidebarDropEdge pos={folderDrop.edge.pos} />}
 				<SidebarFolderRow
 					folder={folder}
 					depth={depth}
 					open={folderOpen}
+					dropProps={folderDrop.rowDropProps({ kind: "folder", id: folder.id, parentId, siblings, folderOpen, reorder: !searching })}
 					compact={compactSessionList}
 					draggable={Boolean(organization)}
 					dropActive={folderDrop.dropTarget === folder.id}
@@ -817,11 +824,12 @@ function SessionsSidebarBody() {
 					<NewFolderRow depth={depth + 1} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
 						onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: folder.id })} />
 				)}
-				{folderOpen && renderTree(node.children, depth + 1)}
+				{folderOpen && renderTree(node.children, depth + 1, folder.id)}
 				<SidebarFolderRule depth={depth} edge="bottom" />
 			</div>
 		);
 	});
+	};
 
 	return (
 		<aside
@@ -1109,6 +1117,19 @@ function SessionsSidebarBody() {
 						>
 							Export as Markdown…
 						</button>
+						{(() => {
+							const level = organization && ctxChatId ? placementOf(organization, ctxChatId)?.folderId ?? null : null;
+							return organization?.order?.[level ?? ""] ? (
+								<button
+									type="button"
+									data-testid="session-ctx-sort-az"
+									onClick={() => { setCtxChatId(null); void changeFolders({ action: "reset-order", parentId: level }).catch(() => {}); }}
+									className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+								>
+									{level === null ? "Sort sessions A–Z" : "Sort this folder A–Z"}
+								</button>
+							) : null;
+						})()}
 						<button
 							type="button"
 							data-testid="ctx-delete"
@@ -1158,6 +1179,16 @@ function SessionsSidebarBody() {
 						>
 							New subfolder
 						</button>
+						{organization?.order?.[ctxFolderId] && (
+							<button
+								type="button"
+								data-testid="folder-ctx-sort-az"
+								onClick={() => { const id = ctxFolderId; setCtxFolderId(null); void changeFolders({ action: "reset-order", parentId: id }).catch(() => {}); }}
+								className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							>
+								Sort contents A–Z
+							</button>
+						)}
 						<button
 							type="button"
 							data-testid="folder-ctx-delete"

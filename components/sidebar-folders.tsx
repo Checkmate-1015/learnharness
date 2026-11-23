@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useState, type DragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
-import { canMoveFolder, type OrganizationAction, type SourceFolder, type SourceOrganization } from "@/src/core";
+import { canMoveFolder, orderKey, type OrganizationAction, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { EditableSourceName, SOURCE_DRAG_TYPE, SourceDragRow } from "@/components/source-folder-tree";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +92,62 @@ export function useSidebarDrop(organization: SourceOrganization | undefined, cha
 			void change({ action: "move", kind: item.kind, id: item.id, parentId }).catch(() => {});
 		},
 	} : {};
+	/* LOCAL PATCH (sidebar-order): row drops place the dragged entry before
+	   or after the row (a folder row's middle still drops INTO the folder)
+	   and save that container's manual order. Off while searching. */
+	const [edge, setEdge] = useState<{ id: string; pos: "before" | "after" }>();
+	const readItem = (event: DragEvent) => {
+		let item: { kind?: unknown; id?: unknown };
+		try { item = JSON.parse(event.dataTransfer.getData(SOURCE_DRAG_TYPE)); } catch { return null; }
+		if (!item || typeof item !== "object" || (item.kind !== "source" && item.kind !== "folder") || typeof item.id !== "string") return null;
+		return item as { kind: "source" | "folder"; id: string };
+	};
+	const zone = (event: DragEvent, folderRow: { open: boolean } | null): "before" | "after" | "into" => {
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		const y = (event.clientY - rect.top) / Math.max(1, rect.height);
+		if (!folderRow) return y < 0.5 ? "before" : "after";
+		if (y < 0.3) return "before";
+		if (y > 0.7 && !folderRow.open) return "after";
+		return "into";
+	};
+	const rowDropProps = (row: { kind: "source" | "folder"; id: string; parentId: string | null; siblings: readonly string[]; folderOpen?: boolean; reorder: boolean }) => organization ? {
+		onDragOver(event: DragEvent) {
+			if (!Array.from(event.dataTransfer.types).includes(SOURCE_DRAG_TYPE)) return;
+			event.preventDefault(); event.stopPropagation();
+			const where = zone(event, row.kind === "folder" ? { open: Boolean(row.folderOpen) } : null);
+			const target = where === "into" ? row.id : row.parentId;
+			const valid = dragged?.kind !== "folder" || canMoveFolder(organization, dragged.id, target);
+			event.dataTransfer.dropEffect = valid ? "move" : "none";
+			if (!valid) { setDropTarget(undefined); setEdge(undefined); return; }
+			if (where === "into" || !row.reorder) { setEdge(undefined); setDropTarget(target); return; }
+			setDropTarget(undefined);
+			setEdge((previous) => previous?.id === row.id && previous.pos === where ? previous : { id: row.id, pos: where });
+		},
+		onDragLeave(event: DragEvent) {
+			if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+			setEdge((previous) => previous?.id === row.id ? undefined : previous);
+		},
+		onDrop(event: DragEvent) {
+			const item = readItem(event);
+			if (!item) return;
+			event.preventDefault(); event.stopPropagation();
+			const where = zone(event, row.kind === "folder" ? { open: Boolean(row.folderOpen) } : null);
+			setDropTarget(undefined); setDragged(undefined); setEdge(undefined);
+			if (where === "into" || !row.reorder) {
+				const parentId = where === "into" ? row.id : row.parentId;
+				if (item.kind === "folder" && !canMoveFolder(organization, item.id, parentId)) return;
+				void change({ action: "move", kind: item.kind, id: item.id, parentId }).catch(() => {});
+				return;
+			}
+			if (item.id === row.id) return;
+			if (item.kind === "folder" && !canMoveFolder(organization, item.id, row.parentId)) return;
+			const base = organization.order?.[orderKey(row.parentId)] ?? [];
+			const merged = [...base, ...row.siblings.filter((x) => !base.includes(x))].filter((x) => x !== item.id);
+			const at = merged.indexOf(row.id);
+			merged.splice(at < 0 ? merged.length : at + (where === "after" ? 1 : 0), 0, item.id);
+			void change({ action: "arrange", kind: item.kind, id: item.id, parentId: row.parentId, order: merged }).catch(() => {});
+		},
+	} : {};
 	const containerProps = {
 		onDragStart(event: DragEvent) {
 			try {
@@ -99,13 +155,14 @@ export function useSidebarDrop(organization: SourceOrganization | undefined, cha
 				if (item && (item.kind === "source" || item.kind === "folder") && typeof item.id === "string") setDragged(item);
 			} catch { /* an unrelated drag is not an organization move */ }
 		},
-		onDragEnd() { setDropTarget(undefined); setDragged(undefined); },
+		onDragEnd() { setDropTarget(undefined); setDragged(undefined); setEdge(undefined); },
 	};
-	return { dropTarget, dropProps, containerProps };
+	return { dropTarget, dropProps, rowDropProps, edge, containerProps };
 }
 
-export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable, compact = false }: {
+export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable, compact = false, dropProps }: {
 	folder: SourceFolder; depth: number; open: boolean; dropActive: boolean; renaming: boolean; draggable: boolean; compact?: boolean;
+	dropProps?: Partial<Pick<HTMLAttributes<HTMLDivElement>, "onDragOver" | "onDragLeave" | "onDrop">>;
 	onToggle: () => void;
 	onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 	onRename: (name: string) => Promise<unknown>;
@@ -114,7 +171,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 	const Icon = open ? FolderOpenIcon : FolderIcon;
 	return (
 		<SourceDragRow kind="folder" id={folder.id} name={folder.name} enabled={draggable && !renaming}
-			data-testid={`sidebar-folder-row-${folder.id}`} data-drop-active={dropActive}
+			data-testid={`sidebar-folder-row-${folder.id}`} data-drop-active={dropActive} {...dropProps}
 			style={{ marginLeft: sidebarRowBox(depth).marginLeft }} className={cn("relative transition-colors", dropActive && "bg-accent/50")}>
 			{renaming ? (
 				<div className={cn("flex w-full items-center gap-1 pr-3", compact ? SIDEBAR_COMPACT_ROW : "py-1.5")} style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
@@ -147,4 +204,9 @@ export function NewFolderRow({ depth, onCreate, onDone, compact = false }: { dep
 			<EditableSourceName name="" initiallyEditing inputClassName={sidebarNameFont(compact)} onCancel={onDone} onSave={async (name) => { await onCreate(name); onDone(); }} />
 		</div>
 	);
+}
+
+/** LOCAL PATCH (sidebar-order): the insertion line a reorder drop shows. */
+export function SidebarDropEdge({ pos }: { pos: "before" | "after" }) {
+	return <div aria-hidden="true" data-testid="sidebar-drop-edge" className={cn("pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-primary", pos === "before" ? "-top-px" : "-bottom-px")} />;
 }
