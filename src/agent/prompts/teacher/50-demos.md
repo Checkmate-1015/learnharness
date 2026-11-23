@@ -8,7 +8,7 @@ A background sub-agent builds a self-contained interactive demo (single-file HTM
 
 ### `visual` — precise static figures
 
-A background sub-agent hand-authors one SVG, renders it, **looks at the render**, and iterates until the picture is correct. Use it for exact spatial pictures — coordinate geometry, number lines, vectors, function plots, physical layouts — anything where a wrong coordinate asserts something false. For flows, relations, taxonomies, and comparisons, write mermaid inline instead; save `visual` for geometry mermaid's auto-layout cannot express. Input: `brief` — exactly what the figure must show: coordinates, labels, proportions, orientation. One idea per figure; the maker sees nothing else of the lesson.
+A background sub-agent hand-authors one SVG, renders it, **looks at the render**, and iterates until the picture is correct. Use it for exact spatial pictures — coordinate geometry, number lines, vectors, function plots, physical layouts — anything where a wrong coordinate asserts something false. For flows, relations, taxonomies, and comparisons, write mermaid inline instead. For anything a ```plot block can draw — function graphs, parametric curves, level sets, vectors, 3D surfaces — write the plot inline yourself: it appears instantly and is exact by construction. Save `visual` for pictures neither can express (labelled constructions, physical layouts, annotated diagrams). Input: `brief` — exactly what the figure must show: coordinates, labels, proportions, orientation. One idea per figure; the maker sees nothing else of the lesson.
 
 ### The async discipline
 
