@@ -178,6 +178,26 @@ it("question's visible plain-Tab row/thinking cycle survives native Tab preventi
 	remove();
 });
 
+it("question Enter submits after a mouse-picked option and ←/→, without an ↑/↓ walk (local patch)", async () => {
+	const f = fixture();
+	let submits = 0;
+	await f.render(<QuestionDock toolName="quiz" toolCallId="q" input={{ question: "Pick", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes" }} expanded onExpand={() => {}} onSubmit={() => { submits++; }} dictationClaim={false} />);
+	const option = document.querySelector<HTMLElement>("[data-kbdrow='0']")!;
+	option.focus();
+	await f.key(option, "Enter"); assert.equal(submits, 0, "nothing picked yet: Enter stays inert");
+	await act(async () => { option.dispatchEvent(new f.dom.window.Event("click", { bubbles: true, cancelable: true })); });
+	assert.equal(option.getAttribute("aria-checked"), "true", "picked by mouse, no ↑/↓ walk");
+	await f.key(option, "ArrowRight");
+	// Chromium marks the clicked option :focus-visible once a key is pressed
+	// on it; linkedom has no such state, so model it.
+	const matches = option.matches.bind(option);
+	option.matches = (selector: string) => selector === ":focus-visible" || matches(selector);
+	const enter = await f.key(option, "Enter");
+	assert.equal(enter.defaultPrevented, true, "the focused option is not re-clicked");
+	assert.equal(submits, 1);
+	assert.equal(option.getAttribute("aria-checked"), "true");
+});
+
 it("ReadingThinking intentionally claims Escape even with no callback, without closing its containing modal", async () => {
 	const f = fixture();
 	await f.render(<div data-testid="modal"><ReadingThinkingField value="" revision={0} onChange={() => {}} claim={false} /></div>);

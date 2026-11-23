@@ -5,7 +5,7 @@ import type { ViewReaderRef, NativeQuestionViewState } from "./session-view-read
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { buttonKeepsNativeEnter, useEnterSubmits } from "@/components/enter-submits";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput, pathInputClassName } from "@/components/path-input";
@@ -714,7 +714,21 @@ function QuestionDockForm({
 				e.preventDefault();
 				kbdAct(kbdIdx);
 			} else if (e.key === "Enter") {
-				if (kbdIdx === null || !canSubmit) return;
+				// Local patch (Intel build): Enter submits from ANYWHERE once an
+				// answer exists — not only after an ↑/↓ walk. Upstream required
+				// kbdIdx, so a mouse-picked option or a clicked confidence
+				// slider (a range INPUT, which the window-level useEnterSubmits
+				// skips) left Enter dead, or re-clicked the focused option.
+				// Buttons OUTSIDE the dock that keep native Enter (keyboard-
+				// walked menus, overlays) are still left alone.
+				if (!canSubmit) return;
+				if (
+					kbdIdx === null &&
+					t?.tagName === "BUTTON" &&
+					!rootRef.current?.contains(t) &&
+					buttonKeepsNativeEnter(t)
+				)
+					return;
 				e.preventDefault();
 				submit();
 			}
