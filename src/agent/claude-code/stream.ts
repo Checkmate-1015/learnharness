@@ -37,6 +37,7 @@ import { addLiveProcess, getLiveProcess, removeLiveProcess, type LiveProcess } f
 import { configurationForReuse, conversationForReuse } from "./reuse-context.ts";
 import { BRIDGE_SERVER_NAME, createToolBridge, toolNameFromMcp, type PendingToolCall, type ToolBridge } from "./tool-bridge.ts";
 import { toClaudeInput, toStreamJsonLine } from "./transcript.ts";
+import { salvageTypedToolCall } from "./salvage.ts";
 
 type RunClaudeOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal };
 
@@ -367,6 +368,24 @@ class ClaudeTurn {
 	}
 
 	private finish(): void {
+		// Local patch (cli-replay-guard): a reply that TYPED a harness call
+		// ("[tool call quiz] {...}") instead of making it becomes a real call.
+		// The process is killed after this turn, so the next request replays fresh.
+		if (this.output.stopReason === "stop" && !this.output.content.some((b) => b.type === "toolCall")) {
+			for (const block of this.output.content) {
+				if (block.type !== "text") continue;
+				const salvaged = salvageTypedToolCall(block.text, this.harnessToolNames);
+				if (!salvaged) continue;
+				block.text = salvaged.text;
+				const call: ToolCall = { type: "toolCall", id: `toolu_salvaged_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, name: salvaged.name, arguments: salvaged.arguments as ToolCall["arguments"] };
+				const contentIndex = this.output.content.length;
+				this.output.content.push(call);
+				this.stream.push({ type: "toolcall_start", contentIndex, partial: this.output });
+				this.stream.push({ type: "toolcall_end", contentIndex, toolCall: call, partial: this.output });
+				this.output.stopReason = "toolUse";
+				break;
+			}
+		}
 		const { stopReason } = this.output;
 
 		if (stopReason === "error") {

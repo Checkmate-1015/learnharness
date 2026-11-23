@@ -98,13 +98,27 @@ function toUserContent(conversation: Message[]): ClaudeContentBlock[] {
 	return blocks;
 }
 
+export const REPLAY_TOOL_CALL_RULE =
+	"## Transcript replay\n\n" +
+	"The conversation so far arrives as a text transcript. Lines like `[tool call quiz] {...}` and `[tool result quiz]` are RECORDS of tool calls that were already made through the real tools. " +
+	"Never write such a line, or a tool's JSON arguments, in your own reply: the learner would see raw JSON and nothing would happen. " +
+	"To ask a question, deliver prose, or use any tool now, call the actual tool.";
+
 export function toClaudeInput(messages: Message[], resumeAfter = 0): ClaudeInput {
 	const conversation = messages.filter((message) => message.role !== "system");
 
+	// Local patch (cli-replay-guard): the replay below renders past tool calls
+	// as "[tool call NAME] {json}" text. Models (seen with Sonnet) then copy
+	// that line into their own reply instead of calling the tool, so the
+	// learner sees raw JSON and no question. Say plainly that those lines are
+	// records only.
+	const replayed = conversation.slice(resumeAfter);
+	const replaysToolCalls = replayed.length > 1 && replayed.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "toolCall"));
+	const basePrompt = getCurrentSystemPrompt(messages);
 	return {
-		systemPrompt: getCurrentSystemPrompt(messages),
+		systemPrompt: replaysToolCalls ? `${basePrompt}\n\n${REPLAY_TOOL_CALL_RULE}` : basePrompt,
 		tools: getCurrentTools(messages),
-		userContent: toUserContent(conversation.slice(resumeAfter)),
+		userContent: toUserContent(replayed),
 	};
 }
 
