@@ -643,7 +643,9 @@ export function questionDisplayOptions(raw: RawOptions, kind: QuestionKind, mult
 } {
 	const authored = normalizeWithPositions(raw);
 	const options = authored.map(({ option }) => option);
-	const displayed = kind === "quiz" ? shuffleOptions(options, seededRandom(toolCallId)) : options;
+	// Local patch (keep-option-order): the teacher's order, never shuffled.
+	void toolCallId;
+	const displayed = options;
 	if (kind === "explain" || multi || displayed.length === 0 || displayed.length > OPTION_LETTERS.length) return { options: displayed };
 	const positions = new Map(authored.map(({ option, position }) => [option, position]));
 	const optionOrder = Object.fromEntries(displayed.map((option, i) => [OPTION_LETTERS[i]!, positions.get(option)!]));

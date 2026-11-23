@@ -20,10 +20,10 @@ function question(kind: "quiz" | "ask", id: string): QuestionData {
 	};
 }
 
-test("letters map back to authored positions without changing the seeded permutation or grading", () => {
+test("quiz options keep the teacher's order; letters map back to authored positions without changing grading", () => {
 	const q = question("quiz", "q2");
-	assert.deepEqual(q.options, shuffleOptions(normalizeOptions(authored), seededRandom(q.id)));
-	assert.notDeepEqual(q.options, normalizeOptions(authored), "exercise a nonidentity shuffle");
+	assert.deepEqual(q.options, normalizeOptions(authored), "never shuffled");
+	assert.deepEqual({ ...q.optionOrder }, { A: 1, B: 2, C: 3 });
 	for (const [i, option] of q.options.entries()) {
 		const letter = String.fromCharCode(65 + i);
 		assert.equal(authored[q.optionOrder![letter]! - 1]!.value, option.value);
@@ -42,14 +42,16 @@ test("letters map back to authored positions without changing the seeded permuta
 test("ask preserves author order and Other still supplies the map without a selected letter", () => {
 	const q = question("ask", "ask1");
 	assert.deepEqual(q.options, normalizeOptions(authored));
-	assert.deepEqual(q.optionOrder, { A: 1, B: 2, C: 3 });
+	assert.deepEqual({ ...q.optionOrder }, { A: 1, B: 2, C: 3 });
 	assert.deepEqual(compactAnswerForModel(buildAnswer(q, { other: "Mars", thinking: "Not B" })), {
 		kind: "ask", optionOrder: { A: 1, B: 2, C: 3 }, other: "Mars", thinking: "Not B",
 	});
 });
 
 test("older answers infer letters from saved rows, not from author order or a new shuffle", () => {
-	const q = question("quiz", "q2");
+	// An answer saved when quizzes were still shuffled.
+	const shuffled = shuffleOptions(normalizeOptions(authored), seededRandom("q2"));
+	const q = { ...question("quiz", "q2"), options: shuffled, correctIndices: resolveCorrect("v", shuffled).indices };
 	const old = buildAnswer({ ...q, optionOrder: undefined }, { values: ["v"] });
 	const original = { question: q.question, options: authored, correctAnswer: "v", explanation: "Venus." };
 	const snapshot = JSON.stringify(old);
