@@ -179,6 +179,10 @@ export const ChatActionsContext = createContext<{
 	/** Opens the model setup dialog (BYOK, 2026-09-22): refused job cards
 	 *  deep-link into the same SetupDialog the send interception uses. */
 	openSetup: () => void;
+	/** Local patch (show-demos-early): true while a quiz/ask question waits
+	 *  for the learner, so finished demos/figures can show before the
+	 *  answer instead of waiting for delivery into the transcript. */
+	questionPending?: boolean;
 } | null>(null);
 
 /** The BYOK refusal envelope from the transport's error text: the
@@ -1648,6 +1652,7 @@ export function Chat({
 				syncFromServer,
 				sendText: (t: string) => { void prepareText(t); },
 				openSetup: () => setSetupOpen(true),
+				questionPending: pendingQuestionId !== null,
 			}}
 		>
 		<SessionMermaidContext.Provider
