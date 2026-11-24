@@ -5,6 +5,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
 import { detectSupportedImageMimeTypeFromFile, processImage } from "../image-processing/index.ts";
+import { CLI_CWD_PREFIX } from "../claude-code/constants.ts";
 
 /**
  * The read tool — sources v0 (2026-09): a Node port of pi's read semantics
@@ -79,6 +80,21 @@ function readTextSlice(text: string, offset: number | undefined, limit: number |
 }
 
 /**
+ * The Claude CLI saves every image it is sent to `<its scratch folder>/<session>/images/<n>.<ext>`
+ * and shows the model that path. When a chat's history is replayed to a fresh
+ * CLI, each earlier image gets such a path, and a tutor that opens them stores
+ * every image in the chat again (seen 2026-11-24: 7 learner images became 63,
+ * 19 re-reads before one question). Those copies are already in the model's
+ * context, so reading one answers with a note.
+ */
+const REPLAYED_IMAGE_COPY = new RegExp(`${CLI_CWD_PREFIX}[^/\\\\]+[/\\\\][^/\\\\]+[/\\\\]images[/\\\\][^/\\\\]+$`);
+export const REPLAYED_IMAGE_COPY_NOTE =
+	"Not read: this path is the CLI's own copy of an image that is already shown in the conversation above. It is a page from earlier in this session, not a new attachment. Look at the image above instead of reading this file.";
+export function isReplayedImageCopy(absolutePath: string): boolean {
+	return REPLAYED_IMAGE_COPY.test(absolutePath);
+}
+
+/**
  * The read tool, shared verbatim by the prober and the teacher. Sources v1
  * (2026-09-19): the description is pi-verbatim (user: copy tool usage
  * guidance exactly) — the teaching doctrine moved to the shared prompt
@@ -99,6 +115,7 @@ export function createReadTool(model?: ReadModel): AgentTool<typeof readInput> {
 		parameters: readInput,
 		execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }, { signal }): Promise<string | ImageFileResult> => {
 			const absolute = resolveSourcePath(rawPath);
+			if (isReplayedImageCopy(absolute)) return REPLAYED_IMAGE_COPY_NOTE;
 			const mime = await detectSupportedImageMimeTypeFromFile(absolute);
 			const buffer = await fs.readFile(absolute, { signal });
 			if (mime) {

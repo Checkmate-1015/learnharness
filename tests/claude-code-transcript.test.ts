@@ -170,3 +170,33 @@ test('toStreamJsonLine emits {"type":"user","message":{"role":"user","content":[
 		message: { role: "user", content: [{ type: "text", text: "hi" }] },
 	});
 });
+
+test("an image that appears again later in the replay is sent once and noted afterwards", () => {
+	const page = { type: "image" as const, data: "AAAA", mimeType: "image/png" };
+	const other = { type: "image" as const, data: "CCCC", mimeType: "image/png" };
+	const messages: Message[] = [
+		user([{ type: "text", text: "my working" }, page]),
+		assistant([{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "/tmp/images/1.png" } }]),
+		toolResult("read", [{ type: "text", text: "Read image file [image/png]" }, page]),
+		user([{ type: "text", text: "and this" }, other, page]),
+	];
+	assert.deepEqual(toClaudeInput(messages).userContent, [
+		{ type: "text", text: "my working" },
+		{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+		{ type: "text", text: '[tool call read] {"path":"/tmp/images/1.png"}\n\n[tool result read]\nRead image file [image/png]\n\n[same image as one shown earlier in this transcript]\n\n[user]\nand this' },
+		{ type: "image", source: { type: "base64", media_type: "image/png", data: "CCCC" } },
+		{ type: "text", text: "[same image as one shown earlier in this transcript]" },
+	]);
+});
+
+test("a replay that carries images says they are earlier pages, not new attachments", async () => {
+	const { REPLAY_IMAGE_RULE, REPLAY_TOOL_CALL_RULE } = await import("../src/agent/claude-code/transcript.ts");
+	const page = { type: "image" as const, data: "AAAA", mimeType: "image/png" };
+	const withImage: Message[] = [system({ content: "You are a tutor." }), user([{ type: "text", text: "my working" }, page]), assistant([{ type: "text", text: "ok" }]), user("next")];
+	assert.equal(toClaudeInput(withImage).systemPrompt, `You are a tutor.\n\n## Transcript replay\n\n${REPLAY_IMAGE_RULE}`);
+	const withCall: Message[] = [...withImage.slice(0, 2), assistant([{ type: "toolCall", id: "r1", name: "read", arguments: {} }]), toolResult("read", [{ type: "text", text: "x" }]), user("next")];
+	assert.equal(toClaudeInput(withCall).systemPrompt, `You are a tutor.\n\n${REPLAY_TOOL_CALL_RULE}\n\n${REPLAY_IMAGE_RULE}`);
+	// A lone new message with an image is a real attachment: no rule.
+	assert.equal(toClaudeInput([system({ content: "You are a tutor." }), user([page])]).systemPrompt, "You are a tutor.");
+	assert.equal(toClaudeInput([...withImage.slice(0, 1), user("hi"), assistant([{ type: "text", text: "ok" }]), user("next")]).systemPrompt, "You are a tutor.");
+});

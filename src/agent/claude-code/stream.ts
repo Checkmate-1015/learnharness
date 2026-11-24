@@ -31,7 +31,7 @@ import { CliSessions, freshLaunch, type CliLaunch } from "./cli-sessions.ts";
 import { offerWorkerContinuation } from "../worker-request-admission.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
-import { ClaudeCodeError } from "./constants.ts";
+import { CLI_CWD_PREFIX, ClaudeCodeError } from "./constants.ts";
 import { ContextWindowProbe } from "./context-window.ts";
 import { addLiveProcess, getLiveProcess, removeLiveProcess, type LiveProcess } from "./live-processes.ts";
 import { configurationForReuse, conversationForReuse } from "./reuse-context.ts";
@@ -407,7 +407,7 @@ class ClaudeTurn {
 type TurnFiles = { cwd: string; privateDir: string; systemPromptFile: string; mcpConfigFile: string };
 
 async function createTurnFiles(systemPrompt: string, mcpConfig: string): Promise<TurnFiles> {
-	const cwd = await mkdtemp(join(tmpdir(), "claude-code-cwd-"));
+	const cwd = await mkdtemp(join(tmpdir(), CLI_CWD_PREFIX));
 	let privateDir: string | undefined;
 	try {
 		privateDir = await mkdtemp(join(tmpdir(), "claude-code-private-"));

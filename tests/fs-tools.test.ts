@@ -438,3 +438,24 @@ describe("abort plumbing (the 2026-09-19 cascade fix)", () => {
 		assert.ok(Date.now() - started < 5_000, "returned promptly");
 	});
 });
+
+describe("read: the Claude CLI's copies of replayed images", () => {
+	it("answers with a note instead of sending the image again", async () => {
+		const { isReplayedImageCopy, REPLAYED_IMAGE_COPY_NOTE } = await import("../src/agent/tools/read.ts");
+		const copy = "/private/tmp/claude-501/-private-var-folders-wl-x-T-claude-code-cwd-AldeUS/5973daf9-0215-4c63-9ed0-a847979d05d2/images/19.png";
+		assert.equal(isReplayedImageCopy(copy), true);
+		// The file need not exist: nothing is read.
+		const result = await readTool.execute("call_1", { path: copy }, undefined as never) as { content: Array<{ type: string; text?: string }> };
+		assert.deepEqual(result.content, [{ type: "text", text: REPLAYED_IMAGE_COPY_NOTE }]);
+	});
+
+	it("leaves every other image path alone", async () => {
+		const { isReplayedImageCopy } = await import("../src/agent/tools/read.ts");
+		for (const other of [
+			"/Users/someone/notes/images/19.png",
+			"/private/tmp/claude-501/-Users-someone-project/5973daf9-0215-4c63-9ed0-a847979d05d2/images/1.png",
+			"/tmp/claude-code-cwd-AldeUS/notes.md",
+			"/private/tmp/claude-501/-T-claude-code-cwd-AldeUS/5973daf9/images/sub/1.png",
+		]) assert.equal(isReplayedImageCopy(other), false, other);
+	});
+});
