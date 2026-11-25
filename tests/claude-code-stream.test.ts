@@ -798,7 +798,7 @@ test("spawns with the model alias, effort, bridge tools, MCP timeout headroom an
 	assert.equal(getFlagValue(call.args, "--allowedTools"), "mcp__learnharness__read,mcp__learnharness__get_weather");
 	assert.equal(call.env.MCP_TOOL_TIMEOUT, "1800000");
 	assert.equal(call.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, "1800000");
-	assert.equal(LIVE_PROCESS_IDLE_TIMEOUT_MS, 600000, "learner-wait retention stays at ten minutes");
+	assert.equal(LIVE_PROCESS_IDLE_TIMEOUT_MS, 1500000, "learner-wait retention stays at twenty-five minutes");
 	for (const name of ["MCP_TOOL_TIMEOUT", "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"]) {
 		assert.ok(Number(call.env[name]) > LIVE_PROCESS_IDLE_TIMEOUT_MS, `${name} must outlast LearnHarness retention`);
 	}
