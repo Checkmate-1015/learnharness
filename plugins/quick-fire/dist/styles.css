@@ -1,0 +1,49 @@
+.quick-fire-card {
+	position: fixed;
+	right: 24px;
+	bottom: 128px;
+	z-index: 40;
+	width: 300px;
+	max-width: calc(100vw - 32px);
+	box-sizing: border-box;
+	padding: 14px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--background);
+	color: var(--foreground);
+	box-shadow: 0 8px 28px color-mix(in oklab, var(--foreground) 16%, transparent);
+	font-size: 14px;
+	line-height: 1.4;
+}
+@media (prefers-reduced-motion: no-preference) {
+	.quick-fire-card { animation: quick-fire-in 120ms ease-out; }
+}
+@keyframes quick-fire-in { from { opacity: 0; } to { opacity: 1; } }
+
+.quick-fire-card p { margin: 0; }
+.quick-fire-prompt { font-weight: 600; overflow-wrap: anywhere; }
+.quick-fire-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.quick-fire-card button {
+	font: inherit;
+	color: inherit;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	cursor: pointer;
+}
+.quick-fire-choice { min-height: 44px; padding: 6px 8px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.quick-fire-card button:hover:not(:disabled) { background: color-mix(in oklab, var(--foreground) 8%, transparent); }
+.quick-fire-choice:disabled { cursor: default; }
+.quick-fire-choice.is-right { border-color: #1a7f37; background: color-mix(in oklab, #1a7f37 22%, var(--background)); }
+.quick-fire-choice.is-wrong { border-color: #cf222e; background: color-mix(in oklab, #cf222e 22%, var(--background)); }
+.quick-fire-choice.is-dim { opacity: 0.55; }
+.quick-fire-note { margin-top: 10px !important; font-size: 12px; opacity: 0.7; }
+.quick-fire-footer { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; }
+.quick-fire-modes { display: flex; margin-right: auto; }
+.quick-fire-mode { padding: 4px 10px; }
+.quick-fire-mode:first-child { border-radius: 8px 0 0 8px; }
+.quick-fire-mode:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+.quick-fire-mode[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.quick-fire-card .quick-fire-mode[aria-pressed="true"]:hover { background: var(--foreground); }
+.quick-fire-skip { padding: 4px 10px; }
+.quick-fire-streak { min-width: 1.5em; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.7; }

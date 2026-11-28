@@ -1,0 +1,11 @@
+{
+	"apiVersion": 1,
+	"id": "quick-fire",
+	"name": "Quick Fire",
+	"version": "0.1.0",
+	"minAppVersion": "0.6.1",
+	"description": "Quick questions in a corner card while the tutor is thinking. Related questions use your Cheap model and may incur cost; Maths is free.",
+	"main": "main.js",
+	"backend": "backend.cjs",
+	"styles": "styles.css"
+}
