@@ -93,7 +93,7 @@ test("parseBatch drops malformed questions and never throws", () => {
 		null,
 		q(9),
 	];
-	assert.deepEqual(parseBatch(JSON.stringify(bad)), [q(9)]);
+	assert.deepEqual(parseBatch(JSON.stringify(bad), () => 0.99), [q(9)]);
 	for (const junk of ["", "not json", "{}", "[1,2]", "null", undefined]) assert.deepEqual(parseBatch(junk), []);
 });
 test("the pool tops up below 3, once at a time, and hands questions out once", async () => {
@@ -157,7 +157,10 @@ test("a settled turn writes a background batch with the cheap model, then take h
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0].purpose, "background");
 	assert.deepEqual(calls[0].model, { provider: "p", id: "m", thinkingLevel: "off" });
-	assert.deepEqual(await handlers.take({ chatId: "c1" }), { question: q(1), note: "" });
+	const taken = await handlers.take({ chatId: "c1" });
+	assert.equal(taken.note, "");
+	assert.equal(taken.question.prompt, "Q1?");
+	assert.equal(taken.question.choices[taken.question.answer], "a");
 });
 test("no cheap model: no call, and take says why", async () => {
 	const { handlers, settle, calls } = host({ cheap: null });
@@ -188,4 +191,14 @@ test("the batch call asks with thinking off, whatever the cheap slot's thinking 
 	const { settle, calls } = host({ cheap: { model: { provider: "claude-code", id: "sonnet" }, thinkingLevel: "high" } });
 	await settle("c1");
 	assert.deepEqual(calls[0].model, { provider: "claude-code", id: "sonnet", thinkingLevel: "off" });
+});
+test("parseBatch shuffles the choices so the right one is not always first", () => {
+	const body = JSON.stringify(Array.from({ length: 5 }, (_, n) => q(n)));
+	const spots = new Set();
+	for (let round = 0; round < 40; round++) for (const item of parseBatch(body)) {
+		assert.equal(item.choices[item.answer], "a");
+		assert.deepEqual([...item.choices].sort(), ["a", "b", "c", "d"]);
+		spots.add(item.answer);
+	}
+	assert.equal(spots.size, 4);
 });

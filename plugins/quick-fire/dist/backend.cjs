@@ -93,8 +93,9 @@ function batchPrompt(lesson) {
 	].join("\n");
 }
 
-// Keeps only well-formed questions. Never throws.
-function parseBatch(text) {
+// Keeps only well-formed questions and shuffles each one's choices: models tend to
+// list the right answer first. Never throws.
+function parseBatch(text, random = Math.random) {
 	if (typeof text !== "string") return [];
 	const start = text.indexOf("["), end = text.lastIndexOf("]");
 	if (start < 0 || end <= start) return [];
@@ -110,7 +111,12 @@ function parseBatch(text) {
 		const choices = item.choices.map(choice => choice.trim().slice(0, 60));
 		if (new Set(choices).size !== 4) continue;
 		if (!Number.isInteger(item.answer) || item.answer < 0 || item.answer > 3) continue;
-		out.push({ prompt, choices, answer: item.answer });
+		const right = choices[item.answer];
+		for (let index = choices.length - 1; index > 0; index--) {
+			const other = Math.floor(random() * (index + 1));
+			[choices[index], choices[other]] = [choices[other], choices[index]];
+		}
+		out.push({ prompt, choices, answer: choices.indexOf(right) });
 		if (out.length === BATCH) break;
 	}
 	return out;
